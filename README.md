@@ -28,19 +28,16 @@ bun run start
 ```yaml
 spotify:
   preferAnonymousToken: true
-  customAnonymousTokenEndpoint: "http://yourserver/api/token"
+  customTokenEndpoint: "http://yourserver/api/token"
 ```
 
 ## Response Format
 ```json
 {
-  "success": true,
-  "accessToken": "BQC7...",
-  "accessTokenExpirationTimestampMs": 1678886400000,
-  "clientId": "3a0ed...",
-  "isAnonymous": false,
-  "cached": false,
-  "timestamp": 1678886300000
+  "clientId": "d8a5...",
+  "accessToken": "BQD...",
+  "accessTokenExpirationTimestampMs": 1761386102976,
+  "isAnonymous": true
 }
 ```
 
