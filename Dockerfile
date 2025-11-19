@@ -1,22 +1,21 @@
-# Use an official Bun runtime as a parent image
-FROM oven/bun:latest
+FROM mcr.microsoft.com/playwright:v1.56.1-jammy
 
-# Set the working directory in the container
+# Install unzip (required for bun installer)
+RUN apt-get update && apt-get install -y unzip curl && rm -rf /var/lib/apt/lists/*
+
+# Install Bun
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
+
 WORKDIR /app
 
-# Copy package.json and bun.lockb to the working directory
-# This allows Bun to cache dependencies
 COPY package.json ./
 
-RUN bunx playwright install
 # Install dependencies
-RUN bun install --frozen-lockfile
+RUN bun install
 
-# Copy the rest of the application code
 COPY . .
 
-# Expose the port the app runs on
 EXPOSE 3000
 
-# Command to run the application
 CMD ["bun", "run", "src/app.ts"]

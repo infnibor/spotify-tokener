@@ -2,7 +2,7 @@
   "name": "spotokn",
   "module": "src/app.ts",
   "type": "module",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "scripts": {
     "start": "bun --env-file=.env run src/app.ts",
