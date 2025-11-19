@@ -86,7 +86,7 @@ if [ ! -f "$ENV_FILE" ]; then
   info "Creating default .env file..."
   cat > "$ENV_FILE" <<EOF
 # Server Configuration
-PORT=3000
+PORT=8080
 NODE_ENV=production
 
 # Browser Configuration
@@ -163,4 +163,4 @@ echo "  • journalctl -u $NAME -f"
 echo "  • systemctl stop $NAME"
 echo "  • systemctl restart $NAME"
 echo ""
-echo "🌐 Service will be available at: http://localhost:3000/api/token"
+echo "🌐 Service will be available at: http://localhost:8080/api/token"

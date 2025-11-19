@@ -36,7 +36,7 @@ bun run start
 ```yaml
 spotify:
   preferAnonymousToken: true
-  customTokenEndpoint: "http://yourserver/api/token"
+  customTokenEndpoint: "http://localhost:8080/api/token"
 ```
 
 
@@ -75,11 +75,11 @@ services:
     container_name: spotokn
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "8080:8080"
     environment:
       NODE_ENV: production
       # You can add custom env variables if needed
-      # PORT=3000
+      # PORT=8080
 ```
 
 ### Start the service:
@@ -115,7 +115,7 @@ docker build -t spotify-tokener .
 ### Run the Container
 
 ```bash
-docker run -p 3000:3000 spotify-tokener
+docker run -p 8080:8080 spotify-tokener
 ```
 
 

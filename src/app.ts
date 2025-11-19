@@ -6,7 +6,7 @@ import { ErrorMiddleware } from "./middleware/error";
 import { logs } from "./utils/logger";
 
 
-const SERVER_PORT = parseInt(process.env.PORT || '3000', 10);
+const SERVER_PORT = parseInt(process.env.PORT || '8080', 10);
 
 class ApplicationServer {
     private readonly app: Elysia;
