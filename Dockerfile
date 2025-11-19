@@ -6,8 +6,9 @@ WORKDIR /app
 
 # Copy package.json and bun.lockb to the working directory
 # This allows Bun to cache dependencies
-COPY package.json bun.lockb ./
+COPY package.json ./
 
+RUN bunx playwright install
 # Install dependencies
 RUN bun install --frozen-lockfile
 
@@ -18,4 +19,4 @@ COPY . .
 EXPOSE 3000
 
 # Command to run the application
-CMD ["bun", "--env-file=.env", "run", "src/app.ts"]
+CMD ["bun", "run", "src/app.ts"]
