@@ -5,8 +5,8 @@ services:
     container_name: spotokn
     restart: unless-stopped
     ports:
-      - "3000:3000"   # change if your app uses another port
+      - "8080:8080"   # change if your app uses another port
     environment:
-      PORT: 3000
+      PORT: 8080
       HEADLESS: true
       #BROWSER_PATH: /usr/bin/google-chrome
