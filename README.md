@@ -1,16 +1,18 @@
-Here's a compact version of your Spotify Tokener documentation:
-
 # Spotify Tokener
 
 Fast Spotify access token generator for LavaSrc with caching.
 
 ## Features
-- 🚀 Fast Playwright-based token generation
-- ⚡ High-performance Elysia API
-- 🔄 Auto-refresh
-- 🛡️ Error resilience with retries
+
+* 🚀 Fast Playwright-based token generation
+* ⚡ High-performance Elysia API
+* 🔄 Auto-refresh system
+* 🛡️ Error resilience with retry logic
+* 🛠️ Environment variables for configuratio
+* 📦 Docker Compose configuration
 
 ## Quick Start
+
 ```bash
 git clone https://github.com/appujet/spotokn.git
 cd spotokn
@@ -20,18 +22,27 @@ npx playwright install-deps
 bun run start
 ```
 
+
+
 ## API Endpoints
-- `GET /api/token` - Get token (`?force=1` to refresh)
-- `GET /health` - Service health
+
+* `GET /api/token` – Get token (`?force=1` to refresh)
+* `GET /health` – Service health
+
+
 
 ## LavaSrc Config
+
 ```yaml
 spotify:
   preferAnonymousToken: true
   customTokenEndpoint: "http://yourserver/api/token"
 ```
 
+
+
 ## Response Format
+
 ```json
 {
   "clientId": "d8a5...",
@@ -41,51 +52,114 @@ spotify:
 }
 ```
 
-## 🐳 Docker
 
-You can containerize the Spotify Tokener application using Docker.
 
-### Build the Docker Image
-Navigate to the root directory of the project and run:
+# 🐳 Docker (Recommended)
+
+You can run **Spotify Tokener fully in Docker** using the public Docker Hub image:
+
+👉 `appujet/spotokn:latest`
+
+
+
+## ⭐ Using Docker Compose (Easiest)
+
+Create a file named **docker-compose.yml**:
+
+```yaml
+version: "3.9"
+
+services:
+  spotokn:
+    image: appujet/spotokn:latest
+    container_name: spotokn
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      # You can add custom env variables if needed
+      # PORT=3000
+```
+
+### Start the service:
+
+```bash
+docker compose up -d
+```
+
+### Check logs:
+
+```bash
+docker compose logs -f
+```
+
+### Stop:
+
+```bash
+docker compose down
+```
+
+
+
+## Manual Docker Build (Optional)
+
+If you want to build locally:
+
+### Build Docker Image
+
 ```bash
 docker build -t spotify-tokener .
 ```
-This command builds a Docker image named `spotify-tokener`.
 
-### Run the Docker Container
-To run the container and map port 3000 from the container to your host, while also providing environment variables from your local `.env` file:
+### Run the Container
+
 ```bash
-docker run -p 3000:3000 --env-file .env spotify-tokener
+docker run -p 3000:3000 spotify-tokener
 ```
-Ensure you have a `.env` file in your project root with necessary environment variables (e.g., `PORT`).
 
-## 🛠️ Development
 
-### Prerequisites
-- **Bun** - JavaScript runtime ([install](https://bun.sh))
-- **Playwright** - Browser automation
 
-### Environment Setup
+# 🛠 Development
+
+### Requirements
+
+* **Bun**
+* **Playwright** (Chromium)
+
+### Development Mode
+
 ```bash
-# Development mode
 bun run dev
+```
 
-# Production build
+### Production Mode
+
+```bash
 bun run start
 ```
 
-## 🔍 Troubleshooting
 
-**Common Issues:**
-- **Playwright install fails:** Run `npx playwright install chromium --force`
-- **Token generation slow:** Check browser automation setup
-- **Cache not working:** Verify memory limits and concurrency settings
 
-**Performance Tips:**
-- Use `force=1` sparingly to avoid rate limits
-- Monitor `/api/token/status` for proactive refresh timing
-- Scale horizontally for high-traffic scenarios
+# 🔍 Troubleshooting
 
----
+### Common Issues
 
-**Need help?** Open an issue on [GitHub](https://github.com/appujet/spotokn/issues) or check the [Wiki](https://github.com/appujet/spotokn/wiki) for detailed guides.
+| Issue                       | Fix                                          |
+| --------------------------- | -------------------------------------------- |
+| Playwright fails to install | `npx playwright install chromium --force`    |
+| Token slow or failing       | Check Chromium installation inside container |
+| Cache not working           | Verify container memory + concurrency        |
+
+
+
+# ⚡ Performance Tips
+
+* Avoid using `force=1` too frequently
+* Monitor `/api/token` for refresh timing
+* Horizontal scaling recommended for large LavaSrc clusters
+
+
+**Need help?**
+Open an issue: [https://github.com/appujet/spotokn/issues](https://github.com/appujet/spotokn/issues)
+Or check the Wiki for advanced setup.
