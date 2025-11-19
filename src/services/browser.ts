@@ -1,208 +1,241 @@
 import playwright from "playwright";
-import type {
-    Browser,
-    LaunchOptions,
-    BrowserContext,
-    Response,
-} from "playwright";
+import type { Browser, LaunchOptions, BrowserContext, Page } from "playwright";
 import type { SpotifyToken, Cookie } from "../types/types";
 import { logs } from "../utils/logger";
 
 export class SpotifyBrowser {
     private browser: Browser | undefined;
     private context: BrowserContext | undefined;
+    private initPromise: Promise<{ browser: Browser; context: BrowserContext }> | null = null;
+    private isInitializing = false;
 
-    private async launch(): Promise<{
-        browser: Browser;
-        context: BrowserContext;
-    }> {
-        if (!this.browser || !this.context) {
+    private async launch(): Promise<{ browser: Browser; context: BrowserContext }> {
+        // If already initializing, wait for that
+        if (this.isInitializing && this.initPromise) {
+            return await this.initPromise;
+        }
+
+        // If browser exists and is healthy, return it
+        if (this.browser && this.context) {
             try {
-                const executablePath =
-                    process.env.BROWSER_PATH && process.env.BROWSER_PATH.trim() !== ""
-                        ? process.env.BROWSER_PATH
-                        : undefined;
-                const launchOptions: LaunchOptions = {
-                    headless: process.env.HEADLESS !== 'false',
-                    args: [
-                        "--disable-gpu",
-                        "--disable-dev-shm-usage",
-                        "--disable-setuid-sandbox",
-                        "--no-sandbox",
-                        "--no-zygote",
-                        "--disable-extensions",
-                        "--disable-background-timer-throttling",
-                        "--disable-backgrounding-occluded-windows",
-                        "--disable-renderer-backgrounding",
-                    ],
-                };
-                if (executablePath) launchOptions.executablePath = executablePath;
-
-                this.browser = await playwright.chromium.launch(launchOptions);
-                this.context = await this.browser.newContext({
-                    userAgent:
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                });
-
-                const initPage = await this.context.newPage();
-                await initPage.goto("https://open.spotify.com/");
-                await initPage.close();
-            } catch (err) {
-                this.browser = undefined;
-                this.context = undefined;
-                logs("error", "Failed to launch browser or context", err);
-                throw err;
-            }
-        } else {
-            if (this.browser.isConnected() === false) {
-                logs("warn", "Browser is not connected, relaunching...");
-                this.browser = undefined;
-                this.context = undefined;
-                return this.launch();
-            }
-            try {
-                this.context.pages();
-            } catch {
-                logs("warn", "Context is closed, relaunching...");
-                this.browser = undefined;
-                this.context = undefined;
-                return this.launch();
+                if (this.browser.isConnected()) {
+                    // Test if context is still valid
+                    this.context.pages();
+                    return { browser: this.browser, context: this.context };
+                }
+            } catch (error) {
+                logs('warn', 'Browser/context validation failed, reinitializing', error);
+                await this.forceClose();
             }
         }
-        return { browser: this.browser, context: this.context };
+
+        // Launch new browser
+        this.isInitializing = true;
+        this.initPromise = this.doLaunch();
+
+        try {
+            const result = await this.initPromise;
+            this.isInitializing = false;
+            return result;
+        } catch (error) {
+            this.isInitializing = false;
+            this.initPromise = null;
+            throw error;
+        }
     }
 
-    public async getToken(
-        cookies?: Cookie[],
-    ): Promise<SpotifyToken> {
+    private async doLaunch(): Promise<{ browser: Browser; context: BrowserContext }> {
+        try {
+            const executablePath =
+                process.env.BROWSER_PATH?.trim() || undefined;
+
+            const launchOptions: LaunchOptions = {
+                headless: process.env.HEADLESS !== 'false',
+                args: [
+                    "--disable-gpu",
+                    "--disable-dev-shm-usage",
+                    "--disable-setuid-sandbox",
+                    "--no-sandbox",
+                    "--no-zygote",
+                    "--disable-extensions",
+                    "--disable-background-timer-throttling",
+                    "--disable-backgrounding-occluded-windows",
+                    "--disable-renderer-backgrounding",
+                    "--disable-software-rasterizer",
+                    "--disable-blink-features=AutomationControlled",
+                ],
+            };
+
+            if (executablePath) {
+                launchOptions.executablePath = executablePath;
+            }
+
+            logs('info', 'Launching browser...');
+            this.browser = await playwright.chromium.launch(launchOptions);
+
+            logs('info', 'Creating browser context...');
+            this.context = await this.browser.newContext({
+                userAgent:
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                viewport: { width: 1920, height: 1080 },
+                locale: 'en-US',
+            });
+
+            // Warm up the context
+            const initPage = await this.context.newPage();
+            await initPage.goto("https://open.spotify.com/", {
+                waitUntil: 'domcontentloaded',
+                timeout: 10000,
+            });
+            await initPage.close();
+
+            logs('info', 'Browser launched successfully');
+            return { browser: this.browser, context: this.context };
+        } catch (error) {
+            await this.forceClose();
+            logs('error', 'Failed to launch browser', error);
+            throw error;
+        }
+    }
+
+    public async getToken(cookies?: Cookie[]): Promise<SpotifyToken> {
         const { context } = await this.launch();
+        let page: Page | undefined;
 
-        return new Promise<SpotifyToken>((resolve, reject) => {
-            (async () => {
-                const page = await context.newPage();
-                let responseReceived = false;
+        try {
+            page = await context.newPage();
 
-                try {
-                    await context.clearCookies();
+            // Set up request interception first
+            await page.route("**/*", (route) => {
+                const url = route.request().url();
+                const type = route.request().resourceType();
 
-                    if (cookies && cookies.length > 0) {
-                        const cookieObjects = cookies.map((cookie) => ({
-                            name: cookie.name,
-                            value: cookie.value,
-                            domain: ".spotify.com",
-                            path: "/",
-                            httpOnly: false,
-                            secure: true,
-                            sameSite: "Lax" as const,
-                        }));
-                        await context.addCookies(cookieObjects);
-                        logs(
-                            "info",
-                            "Cookies set for request",
-                            cookieObjects.map((c) => ({
-                                name: c.name,
-                                value: `${c.value.slice(0, 20)}...`,
-                            })),
-                        );
-                    }
+                const blockedTypes = new Set([
+                    "image",
+                    "stylesheet",
+                    "font",
+                    "media",
+                    "websocket",
+                    "other",
+                ]);
 
-                    const timeout = setTimeout(() => {
-                        if (!responseReceived) {
-                            logs("error", "Token fetch timeout");
-                            page.close();
-                            reject(new Error("Token fetch exceeded deadline"));
-                        }
-                    }, 15000);
+                const blockedPatterns = [
+                    "google-analytics",
+                    "doubleclick.net",
+                    "googletagmanager.com",
+                    "https://open.spotifycdn.com/cdn/images/",
+                    "https://encore.scdn.co/fonts/",
+                    "facebook.com",
+                    "analytics",
+                ];
 
-                    page.on("response", async (response: Response) => {
-                        if (!response.url().includes("/api/token")) return;
-
-                        responseReceived = true;
-                        clearTimeout(timeout);
-
-                        try {
-                            if (!response.ok()) {
-                                await page.close();
-                                return reject(new Error("Invalid response from Spotify"));
-                            }
-
-                            const responseBody = await response.text();
-                            let json: unknown;
-                            try {
-                                json = JSON.parse(responseBody);
-                            } catch {
-                                await page.close();
-                                logs("error", "Failed to parse response JSON");
-                                return reject(new Error("Failed to parse response JSON"));
-                            }
-
-                            if (
-                                json &&
-                                typeof json === "object" &&
-                                json !== null &&
-                                "_notes" in json
-                            ) {
-                                delete (json as Record<string, unknown>)._notes;
-                            }
-
-                            await page.close();
-                            resolve(json as SpotifyToken);
-                        } catch (error) {
-                            await page.close();
-                            logs("error", `Failed to process token response: ${error}`);
-                            reject(new Error(`Failed to process token response: ${error}`));
-                        }
-                    });
-
-                    await page.route("**/*", (route) => {
-                        const url = route.request().url();
-                        const type = route.request().resourceType();
-
-                        const blockedTypes = new Set([
-                            "image",
-                            "stylesheet",
-                            "font",
-                            "media",
-                            "websocket",
-                            "other",
-                        ]);
-
-                        const blockedPatterns = [
-                            "google-analytics",
-                            "doubleclick.net",
-                            "googletagmanager.com",
-                            "https://open.spotifycdn.com/cdn/images/",
-                            "https://encore.scdn.co/fonts/",
-                        ];
-
-                        const isBlockedUrl = (u: string) =>
-                            blockedPatterns.some((pat) => u.includes(pat));
-
-                        if (blockedTypes.has(type) || isBlockedUrl(url)) {
-                            route.abort();
-                            return;
-                        }
-
-                        route.continue();
-                    });
-
-                    await page.goto("https://open.spotify.com/");
-                } catch (error) {
-                    if (!responseReceived) {
-                        await page.close();
-                        logs("error", `Navigation failed: ${error}`);
-                        reject(new Error(`Navigation failed: ${error}`));
-                    }
+                if (blockedTypes.has(type) || blockedPatterns.some(p => url.includes(p))) {
+                    route.abort().catch(() => { });
+                    return;
                 }
-            })();
-        });
+
+                route.continue().catch(() => { });
+            });
+
+            // Clear cookies and set new ones if provided
+            await context.clearCookies();
+
+            if (cookies && cookies.length > 0) {
+                const cookieObjects = cookies.map((cookie) => ({
+                    name: cookie.name,
+                    value: cookie.value,
+                    domain: ".spotify.com",
+                    path: "/",
+                    httpOnly: false,
+                    secure: true,
+                    sameSite: "Lax" as const,
+                }));
+                await context.addCookies(cookieObjects);
+                logs('debug', `Set ${cookieObjects.length} cookie(s)`);
+            }
+
+            // Set up response listener
+            const tokenPromise = new Promise<SpotifyToken>((resolve, reject) => {
+                let resolved = false;
+
+                const timeout = setTimeout(() => {
+                    if (!resolved) {
+                        resolved = true;
+                        reject(new Error("Token fetch timeout after 15s"));
+                    }
+                }, 15000);
+
+                page!.on("response", async (response) => {
+                    if (resolved) return;
+                    if (!response.url().includes("/api/token")) return;
+
+                    try {
+                        if (!response.ok()) {
+                            throw new Error(`HTTP ${response.status()}`);
+                        }
+
+                        const text = await response.text();
+                        const json = JSON.parse(text);
+
+                        // Remove _notes field if present
+                        if (json && typeof json === "object" && "_notes" in json) {
+                            delete json._notes;
+                        }
+
+                        resolved = true;
+                        clearTimeout(timeout);
+                        resolve(json as SpotifyToken);
+                    } catch (error) {
+                        if (!resolved) {
+                            resolved = true;
+                            clearTimeout(timeout);
+                            reject(error);
+                        }
+                    }
+                });
+            });
+
+            // Navigate to Spotify
+            await page.goto("https://open.spotify.com/", {
+                waitUntil: 'domcontentloaded',
+                timeout: 10000,
+            });
+
+            // Wait for token response
+            const token = await tokenPromise;
+
+            await page.close();
+            return token;
+
+        } catch (error) {
+            if (page) {
+                await page.close().catch(() => { });
+            }
+            logs('error', 'Token fetch error', error);
+            throw error;
+        }
+    }
+
+    private async forceClose(): Promise<void> {
+        try {
+            if (this.context) {
+                await this.context.close().catch(() => { });
+                this.context = undefined;
+            }
+            if (this.browser) {
+                await this.browser.close().catch(() => { });
+                this.browser = undefined;
+            }
+        } catch (error) {
+            logs('warn', 'Error during force close', error);
+        }
     }
 
     public async close(): Promise<void> {
-        if (this.browser) {
-            await this.browser.close();
-            this.browser = undefined;
-            this.context = undefined;
-        }
+        logs('info', 'Closing browser...');
+        await this.forceClose();
+        this.initPromise = null;
+        this.isInitializing = false;
+        logs('info', 'Browser closed');
     }
 }
