@@ -1,0 +1,12 @@
+
+services:
+  spotokn:
+    image: appujet/spotokn:latest
+    container_name: spotokn
+    restart: unless-stopped
+    ports:
+      - "3000:3000"   # change if your app uses another port
+    environment:
+      PORT: 3000
+      HEADLESS: true
+      #BROWSER_PATH: /usr/bin/google-chrome
