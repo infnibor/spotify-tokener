@@ -1,52 +1,28 @@
-# ================================
-# Stage 1: Build Go binary
-# ================================
-FROM golang:1.22-alpine AS builder
-
-# Install dependencies
-RUN apk add --no-cache git ca-certificates build-base
-
-WORKDIR /build
-
-# Copy go.mod and go.sum
-COPY go.mod go.sum ./
-RUN go mod download
-
-# Copy entire project (cmd + internal)
-COPY . .
-
-# Build binary (static)
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-s -w" \
-    -o spotokn ./cmd/spotokn
-
-# ================================
-# Stage 2: Runtime (Chromium + minimal)
-# ================================
-FROM chromedp/headless-shell:latest
-
-# Install certs
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
 
 WORKDIR /app
 
-# Copy built binary
-COPY --from=builder /build/spotokn .
+# Cache deps
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Non-root user
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
-USER appuser
+# Copy source
+COPY . .
 
-# Environment variables
-ENV PORT=8080
-ENV HEADLESS=true
+# Build
+ARG TARGETOS
+ARG TARGETARCH
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg \
+    CGO_ENABLED=0 \
+    GOOS=$TARGETOS \
+    GOARCH=$TARGETARCH \
+    go build -o spotokn ./cmd/spotokn
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+FROM chromedp/headless-shell
 
-EXPOSE 8080
+# Add your Go binary
+COPY --from=build /app/spotokn /usr/local/bin/spotokn
 
-CMD ["./spotokn"]
+# Default CMD
+ENTRYPOINT ["/usr/local/bin/spotokn"]

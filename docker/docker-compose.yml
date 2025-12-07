@@ -1,8 +1,7 @@
 services:
   spotify-token:
     build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/botxlab/spotokn:latest
     container_name: spotokn
     restart: unless-stopped
     ports:
@@ -16,17 +15,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 5s
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 1G
-        reservations:
-          cpus: '0.5'
-          memory: 256M
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - NET_BIND_SERVICE
