@@ -48,6 +48,12 @@ func (l *Logger) Debug(message string) {
 	}
 }
 
+func (l *Logger) Debugf(format string, args ...interface{}) {
+	if l.verbose {
+		l.log(LogInfo, fmt.Sprintf("[DEBUG] "+format, args...))
+	}
+}
+
 func (l *Logger) Infof(format string, args ...interface{}) {
 	l.Info(fmt.Sprintf(format, args...))
 }

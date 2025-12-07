@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	browserTimeout = 30 * time.Second
-	tokenWaitTime  = 15 * time.Second
+	browserTimeout = 35 * time.Second
+	tokenWaitTime  = 20 * time.Second
 )
 
 type Browser struct {
@@ -23,12 +23,14 @@ type Browser struct {
 	logger      *Logger
 	mu          sync.Mutex
 	isHealthy   bool
+	lastUsed    time.Time
 }
 
 func NewBrowser(logger *Logger) *Browser {
 	b := &Browser{
 		logger:    logger,
 		isHealthy: true,
+		lastUsed:  time.Now(),
 	}
 	b.initialize()
 	return b
@@ -49,6 +51,8 @@ func (b *Browser) initialize() {
 		chromedp.Flag("disable-backgrounding-occluded-windows", true),
 		chromedp.Flag("disable-renderer-backgrounding", true),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
+		chromedp.Flag("disable-web-security", true),
+		chromedp.Flag("disable-features", "IsolateOrigins,site-per-process"),
 		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
 		chromedp.WindowSize(1920, 1080),
 	)
@@ -58,6 +62,7 @@ func (b *Browser) initialize() {
 	}
 
 	b.allocCtx, b.allocCancel = chromedp.NewExecAllocator(context.Background(), opts...)
+	b.logger.Debug("Browser allocator initialized")
 }
 
 func (b *Browser) GetToken(cookies []Cookie) (*SpotifyToken, error) {
@@ -66,6 +71,7 @@ func (b *Browser) GetToken(cookies []Cookie) (*SpotifyToken, error) {
 		b.mu.Unlock()
 		return nil, errors.New("browser not healthy")
 	}
+	b.lastUsed = time.Now()
 	b.mu.Unlock()
 
 	ctx, cancel := chromedp.NewContext(b.allocCtx)
@@ -76,11 +82,20 @@ func (b *Browser) GetToken(cookies []Cookie) (*SpotifyToken, error) {
 
 	tokenChan := make(chan *SpotifyToken, 1)
 	errChan := make(chan error, 1)
+	tokenReceived := false
+	tokenMu := sync.Mutex{}
 
 	chromedp.ListenTarget(timeoutCtx, func(ev interface{}) {
 		if resp, ok := ev.(*network.EventResponseReceived); ok {
 			if contains(resp.Response.URL, "/api/token") {
-				go b.extractToken(ctx, resp.RequestID, tokenChan, errChan)
+				tokenMu.Lock()
+				if !tokenReceived {
+					tokenReceived = true
+					tokenMu.Unlock()
+					go b.extractToken(ctx, resp.RequestID, tokenChan, errChan)
+				} else {
+					tokenMu.Unlock()
+				}
 			}
 		}
 	})
@@ -98,25 +113,44 @@ func (b *Browser) GetToken(cookies []Cookie) (*SpotifyToken, error) {
 		}
 	}
 
+	// Navigate to Spotify
 	tasks = append(tasks, chromedp.Navigate("https://open.spotify.com/"))
 
 	if err := chromedp.Run(timeoutCtx, tasks); err != nil {
+		b.logger.Errorf("Browser navigation failed: %v", err)
 		return nil, err
 	}
 
 	select {
 	case token := <-tokenChan:
+		if token == nil {
+			return nil, errors.New("received nil token")
+		}
+		b.logger.Debug("Token received successfully")
 		return token, nil
 	case err := <-errChan:
+		b.logger.Errorf("Token extraction failed: %v", err)
 		return nil, err
 	case <-time.After(tokenWaitTime):
+		b.logger.Error("Token response timeout")
 		return nil, errors.New("token response timeout")
 	case <-timeoutCtx.Done():
+		b.logger.Errorf("Browser context timeout: %v", timeoutCtx.Err())
 		return nil, timeoutCtx.Err()
 	}
 }
 
 func (b *Browser) extractToken(ctx context.Context, requestID network.RequestID, tokenChan chan *SpotifyToken, errChan chan error) {
+	defer func() {
+		if r := recover(); r != nil {
+			b.logger.Errorf("Panic in extractToken: %v", r)
+			select {
+			case errChan <- errors.New("token extraction panicked"):
+			default:
+			}
+		}
+	}()
+
 	var body string
 	err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		bodyBytes, err := network.GetResponseBody(requestID).Do(ctx)
@@ -128,6 +162,7 @@ func (b *Browser) extractToken(ctx context.Context, requestID network.RequestID,
 	}))
 
 	if err != nil {
+		b.logger.Debugf("GetResponseBody error: %v", err)
 		select {
 		case errChan <- err:
 		default:
@@ -135,10 +170,29 @@ func (b *Browser) extractToken(ctx context.Context, requestID network.RequestID,
 		return
 	}
 
+	if body == "" {
+		b.logger.Error("Empty token response body")
+		select {
+		case errChan <- errors.New("empty token response"):
+		default:
+		}
+		return
+	}
+
 	var token SpotifyToken
 	if err := json.Unmarshal([]byte(body), &token); err != nil {
+		b.logger.Errorf("Token JSON unmarshal error: %v, body: %s", err, body)
 		select {
 		case errChan <- err:
+		default:
+		}
+		return
+	}
+
+	if token.AccessToken == "" {
+		b.logger.Error("Token missing accessToken field")
+		select {
+		case errChan <- errors.New("invalid token: missing accessToken"):
 		default:
 		}
 		return
@@ -147,6 +201,7 @@ func (b *Browser) extractToken(ctx context.Context, requestID network.RequestID,
 	select {
 	case tokenChan <- &token:
 	default:
+		b.logger.Warn("Token channel full, dropping token")
 	}
 }
 
@@ -157,7 +212,15 @@ func (b *Browser) Close() {
 	b.isHealthy = false
 	if b.allocCancel != nil {
 		b.allocCancel()
+		b.allocCancel = nil
 	}
+	b.logger.Debug("Browser closed")
+}
+
+func (b *Browser) IsHealthy() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.isHealthy
 }
 
 func contains(s, substr string) bool {
