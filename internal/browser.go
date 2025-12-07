@@ -7,7 +7,6 @@ import (
 	"os"
 	"sync"
 	"time"
-
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 )
@@ -40,7 +39,17 @@ func (b *Browser) initialize() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	browserPath, err := findBrowser()
+	if err != nil {
+		b.logger.Errorf("Browser detection failed: %v", err)
+		b.isHealthy = false
+		return
+	}
+
+	b.logger.Infof("Using browser: %s", browserPath)
+
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(browserPath),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("disable-setuid-sandbox", true),
@@ -233,4 +242,39 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func findBrowser() (string, error) {
+	if p := os.Getenv("BROWSER_BIN"); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+
+	candidates := []string{
+		`C:\Program Files\Google\Chrome\Application\chrome.exe`,
+		`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
+
+		`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
+		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
+
+		"/usr/bin/google-chrome",
+		"/usr/bin/google-chrome-stable",
+		"/usr/bin/chromium",
+		"/usr/bin/chromium-browser",
+
+		"/usr/bin/microsoft-edge",
+		"/opt/microsoft/msedge/msedge",
+
+		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+		"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+	}
+
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+
+	return "", errors.New("no supported browser found (tried Chrome and Edge; set BROWSER_BIN to override)")
 }
