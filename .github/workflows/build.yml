@@ -60,6 +60,8 @@ jobs:
   release-binaries:
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required to upload release assets
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -67,7 +69,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.25'
+          go-version: '1.25.3'
 
       - name: Build binaries
         run: |
@@ -86,5 +88,3 @@ jobs:
             spotokn-darwin-amd64
             spotokn-darwin-arm64
             spotokn-windows-amd64.exe
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
