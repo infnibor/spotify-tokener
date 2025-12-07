@@ -132,7 +132,9 @@ curl http://localhost:8080/health
 Token Response:
 ```json
 {
-    "accessToken":"BQD..","accessTokenExpirationTimestampMs":1765117919348,"clientId":"d8..",
+    "accessToken":"BQD..",
+    "accessTokenExpirationTimestampMs":1765117919348,
+    "clientId":"d8..",
     "isAnonymous":true
 }
 ```
