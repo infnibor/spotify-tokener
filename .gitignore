@@ -1,1 +1,15 @@
+# Binaries
 *.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# IDE
+.vscode/
+.idea/
+
+# Mac junk
+.DS_Store
