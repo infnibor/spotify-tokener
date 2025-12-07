@@ -1,6 +1,5 @@
 services:
   spotify-token:
-    build:
     image: ghcr.io/botxlab/spotokn:latest
     container_name: spotokn
     restart: unless-stopped
