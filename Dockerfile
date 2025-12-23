@@ -22,6 +22,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 
 FROM chromedp/headless-shell
 
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
 ENV BROWSER_BIN=/headless-shell/headless-shell
 
 COPY --from=build /app/spotokn /usr/local/bin/spotokn

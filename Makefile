@@ -2,7 +2,7 @@
 
 BINARY_NAME=spotokn
 DOCKER_IMAGE=ghcr.io/botxlab/spotokn:latest
-DOCKERFILE=docker/Dockerfile
+DOCKERFILE=Dockerfile
 
 help:
 	@echo "Available commands:"
@@ -38,18 +38,18 @@ docker-push:
 
 # Run Docker Compose
 docker-run:
-	docker compose -f docker/docker-compose.yml up -d
+	docker compose -f docker-compose.yml up -d
 
 # Stop containers
 docker-stop:
-	docker compose -f docker/docker-compose.yml down
+	docker compose -f docker-compose.yml down
 
 # Logs
 docker-logs:
-	docker compose -f docker/docker-compose.yml logs -f
+	docker compose -f docker-compose.yml logs -f
 
 # Clean build artifacts
 clean:
 	rm -f $(BINARY_NAME)
-	docker compose -f docker/docker-compose.yml down -v || true
+	docker compose -f docker-compose.yml down -v || true
 	docker rmi $(DOCKER_IMAGE) 2>/dev/null || true
