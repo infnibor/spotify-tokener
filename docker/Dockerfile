@@ -23,7 +23,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 FROM chromedp/headless-shell
 
 ENV BROWSER_BIN=/headless-shell/headless-shell
-ENV HEADLESS=true
 
 COPY --from=build /app/spotokn /usr/local/bin/spotokn
 

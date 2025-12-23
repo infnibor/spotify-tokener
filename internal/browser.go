@@ -92,6 +92,7 @@ func (b *Browser) GetToken(cookies []Cookie) (*SpotifyToken, error) {
 
 	tokenChan := make(chan *SpotifyToken, 1)
 	errChan := make(chan error, 1)
+	done := make(chan struct{})
 	tokenReceived := false
 	tokenMu := sync.Mutex{}
 
@@ -102,7 +103,7 @@ func (b *Browser) GetToken(cookies []Cookie) (*SpotifyToken, error) {
 				if !tokenReceived {
 					tokenReceived = true
 					tokenMu.Unlock()
-					go b.extractToken(ctx, resp.RequestID, tokenChan, errChan)
+					go b.extractToken(timeoutCtx, resp.RequestID, tokenChan, errChan, done)
 				} else {
 					tokenMu.Unlock()
 				}
@@ -127,36 +128,41 @@ func (b *Browser) GetToken(cookies []Cookie) (*SpotifyToken, error) {
 	tasks = append(tasks, chromedp.Navigate("https://open.spotify.com/"))
 
 	if err := chromedp.Run(timeoutCtx, tasks); err != nil {
+		close(done)
 		b.logger.Errorf("Browser navigation failed: %v", err)
 		return nil, err
 	}
 
 	select {
 	case token := <-tokenChan:
+		close(done)
 		if token == nil {
 			return nil, errors.New("received nil token")
 		}
 		b.logger.Debug("Token received successfully")
 		return token, nil
 	case err := <-errChan:
+		close(done)
 		b.logger.Errorf("Token extraction failed: %v", err)
 		return nil, err
 	case <-time.After(tokenWaitTime):
+		close(done)
 		b.logger.Error("Token response timeout")
 		return nil, errors.New("token response timeout")
 	case <-timeoutCtx.Done():
+		close(done)
 		b.logger.Errorf("Browser context timeout: %v", timeoutCtx.Err())
 		return nil, timeoutCtx.Err()
 	}
 }
 
-func (b *Browser) extractToken(ctx context.Context, requestID network.RequestID, tokenChan chan *SpotifyToken, errChan chan error) {
+func (b *Browser) extractToken(ctx context.Context, requestID network.RequestID, tokenChan chan *SpotifyToken, errChan chan error, done chan struct{}) {
 	defer func() {
 		if r := recover(); r != nil {
 			b.logger.Errorf("Panic in extractToken: %v", r)
 			select {
 			case errChan <- errors.New("token extraction panicked"):
-			default:
+			case <-done:
 			}
 		}
 	}()
@@ -175,7 +181,7 @@ func (b *Browser) extractToken(ctx context.Context, requestID network.RequestID,
 		b.logger.Debugf("GetResponseBody error: %v", err)
 		select {
 		case errChan <- err:
-		default:
+		case <-done:
 		}
 		return
 	}
@@ -184,7 +190,7 @@ func (b *Browser) extractToken(ctx context.Context, requestID network.RequestID,
 		b.logger.Error("Empty token response body")
 		select {
 		case errChan <- errors.New("empty token response"):
-		default:
+		case <-done:
 		}
 		return
 	}
@@ -194,7 +200,7 @@ func (b *Browser) extractToken(ctx context.Context, requestID network.RequestID,
 		b.logger.Errorf("Token JSON unmarshal error: %v, body: %s", err, body)
 		select {
 		case errChan <- err:
-		default:
+		case <-done:
 		}
 		return
 	}
@@ -203,15 +209,15 @@ func (b *Browser) extractToken(ctx context.Context, requestID network.RequestID,
 		b.logger.Error("Token missing accessToken field")
 		select {
 		case errChan <- errors.New("invalid token: missing accessToken"):
-		default:
+		case <-done:
 		}
 		return
 	}
 
 	select {
 	case tokenChan <- &token:
-	default:
-		b.logger.Warn("Token channel full, dropping token")
+	case <-done:
+		b.logger.Warn("Token extraction cancelled")
 	}
 }
 

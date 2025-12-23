@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -37,10 +38,17 @@ func NewTokenService(logger *Logger) *TokenService {
 	}
 
 	ts.initializeProactiveRefresh()
-	
-	// Try initial token fetch with retry
+
+	initCtx, initCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer initCancel()
+
 	maxRetries := 3
-	for i := 0; i < maxRetries; i++ {
+	for i := range maxRetries {
+		select {
+		case <-initCtx.Done():
+			logger.Warn("Initialization cancelled or timed out")
+		default:
+		}
 		if token, err := ts.refreshAnonymousToken(); err == nil && token != nil {
 			ts.initialized = true
 			logger.Info("Service initialized with token")
@@ -48,7 +56,12 @@ func NewTokenService(logger *Logger) *TokenService {
 		} else {
 			logger.Warnf("Initial token fetch attempt %d/%d failed: %v", i+1, maxRetries, err)
 			if i < maxRetries-1 {
-				time.Sleep(time.Duration(i+1) * 2 * time.Second) // Exponential backoff
+				select {
+				case <-initCtx.Done():
+					logger.Warn("Initialization cancelled during backoff")
+					break
+				case <-time.After(time.Duration(i+1) * 2 * time.Second):
+				}
 			}
 		}
 	}
@@ -140,7 +153,7 @@ func (ts *TokenService) refreshAnonymousToken() (*SpotifyToken, error) {
 
 	if isRefreshing {
 		ts.logger.Debug("Another refresh in progress, waiting...")
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond) 
 		ts.mu.RLock()
 		token := ts.anonymousToken
 		ts.mu.RUnlock()
@@ -202,29 +215,42 @@ func (ts *TokenService) refreshAnonymousToken() (*SpotifyToken, error) {
 func (ts *TokenService) fetchTokenWithTimeout(cookies []Cookie) (*SpotifyToken, error) {
 	resultChan := make(chan *SpotifyToken, 1)
 	errChan := make(chan error, 1)
+	done := make(chan struct{})
 
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				ts.logger.Errorf("Panic in token fetch: %v", r)
-				errChan <- errors.New("token fetch panicked")
+				select {
+				case errChan <- errors.New("token fetch panicked"):
+				case <-done:
+				}
 			}
 		}()
-		
+
 		token, err := ts.browser.GetToken(cookies)
 		if err != nil {
-			errChan <- err
+			select {
+			case errChan <- err:
+			case <-done:
+			}
 			return
 		}
-		resultChan <- token
+		select {
+		case resultChan <- token:
+		case <-done:
+		}
 	}()
 
 	select {
 	case token := <-resultChan:
+		close(done)
 		return token, nil
 	case err := <-errChan:
+		close(done)
 		return nil, err
 	case <-time.After(tokenTimeout):
+		close(done)
 		ts.logger.Error("Token fetch timeout, reinitializing browser")
 		go ts.reinitializeBrowser()
 		return nil, errors.New("token fetch timeout")
@@ -233,19 +259,19 @@ func (ts *TokenService) fetchTokenWithTimeout(cookies []Cookie) (*SpotifyToken, 
 
 func (ts *TokenService) reinitializeBrowser() {
 	ts.logger.Warn("Reinitializing browser...")
-	
+
 	if ts.browser != nil {
 		ts.browser.Close()
 	}
-	
+
 	time.Sleep(500 * time.Millisecond)
-	
+
 	ts.browser = NewBrowser(ts.logger)
-	
+
 	ts.mu.Lock()
 	ts.consecutiveFailures = 0
 	ts.mu.Unlock()
-	
+
 	ts.logger.Info("Browser reinitialized")
 }
 
@@ -307,11 +333,11 @@ func (ts *TokenService) Cleanup() {
 	ts.logger.Info("Cleaning up token service...")
 	close(ts.proactiveRefreshStop)
 	time.Sleep(200 * time.Millisecond)
-	
+
 	if ts.browser != nil {
 		ts.browser.Close()
 	}
-	
+
 	ts.mu.Lock()
 	ts.anonymousToken = nil
 	ts.authenticatedToken = nil
