@@ -21,7 +21,7 @@ A simple Spotify Token Service that gives you access tokens for the Spotify Web 
 
 2. **Or use Docker Compose**:
    ```bash
-   docker compose -f docker/docker-compose.yml up -d
+   docker compose -f docker-compose.yml up -d
    ```
 
 3. **Get your token**:
@@ -53,17 +53,17 @@ docker run -p 8080:8080 -d ghcr.io/botxlab/spotokn:latest
 
 #### Or with Docker Compose
 ```bash
-docker compose -f docker/docker-compose.yml up -d
+docker compose -f docker-compose.yml up -d
 ```
 
 #### To Stop
 ```bash
-docker compose -f docker/docker-compose.yml down
+docker compose -f docker-compose.yml down
 ```
 
 #### View Logs
 ```bash
-docker compose -f docker/docker-compose.yml logs -f
+docker compose -f docker-compose.yml logs -f
 ```
 
 ### Option 2: Build and Run from Source
@@ -74,18 +74,13 @@ docker compose -f docker/docker-compose.yml logs -f
 
 #### Local Development
 ```bash
-make run
+go run ./cmd/spotokn
 ```
 Service starts on port 8080.
 
-#### Build Image Manually
+#### Build Image Locally
 ```bash
-make docker-build
-```
-
-#### Push to Registry
-```bash
-make docker-push
+docker build -t ghcr.io/botxlab/spotokn:latest -f Dockerfile .
 ```
 
 ## Configuration
