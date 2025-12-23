@@ -9,7 +9,7 @@ RUN go mod download
 # Copy source
 COPY . .
 
-# Build
+# Build binary
 ARG TARGETOS
 ARG TARGETARCH
 RUN --mount=type=cache,target=/root/.cache/go-build \
@@ -19,10 +19,12 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     GOARCH=$TARGETARCH \
     go build -o spotokn ./cmd/spotokn
 
+
 FROM chromedp/headless-shell
 
-# Add your Go binary
+ENV BROWSER_BIN=/headless-shell/headless-shell
+ENV HEADLESS=true
+
 COPY --from=build /app/spotokn /usr/local/bin/spotokn
 
-# Default CMD
 ENTRYPOINT ["/usr/local/bin/spotokn"]
