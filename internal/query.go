@@ -82,19 +82,19 @@ func GetSpotifyQueryResult(
 		}
 
 		mu.Lock()
+		defer mu.Unlock()
 		requestIDs = append(requestIDs, e.RequestID)
 
 		if appVersion == "" {
 			for k, v := range e.Request.Headers {
 				if strings.ToLower(k) == "spotify-app-version" {
-					if vs, ok := v.(string); ok {
+					if vs, ok := v.(string); ok && vs != "" {
 						appVersion = vs
+						break
 					}
 				}
 			}
 		}
-
-		mu.Unlock()
 	})
 
 	playlistURL := "https://open.spotify.com/playlist/" +
@@ -174,7 +174,7 @@ func GetSpotifyQueryResult(
 		})
 
 		if appVersion == "" {
-			if v, ok := payload["extensions"].(map[string]interface{})["spotifyAppVersion"].(string); ok {
+			if v, ok := payload["extensions"].(map[string]interface{})["spotifyAppVersion"].(string); ok && v != "" {
 				appVersion = v
 			}
 		}
