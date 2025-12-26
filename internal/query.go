@@ -1,7 +1,5 @@
 package internal
 
-package internal
-
 import (
 	"context"
 	"encoding/json"
