@@ -16,46 +16,10 @@ import (
 )
 
 type QueryResult struct {
-	Hash              string `json:"hash"`
-	SpotifyAppVersion string `json:"spotifyAppVersion"`
-	PayloadVersion    string `json:"payloadVersion"`
-}
-
-type OperationHash struct {
-	Operation         string `json:"operation"`
-	Hash              string `json:"hash"`
-}
-
-type QueryResultV2 struct {
 	Hashes            []OperationHash `json:"hashes"`
 	SpotifyAppVersion string          `json:"spotifyAppVersion"`
 	PayloadVersion    string          `json:"payloadVersion"`
 }
-
-package internal
-
-import (
-	"context"
-	"encoding/json"
-	"errors"
-	"os"
-	"net/http"
-	"strings"
-	"sync"
-	"time"
-	"strconv"
-
-	"github.com/chromedp/chromedp"
-	"github.com/chromedp/cdproto/network"
-)
-
-
-type QueryResult struct {
-	Hash              string `json:"hash"`
-	SpotifyAppVersion string `json:"spotifyAppVersion"`
-	PayloadVersion    string `json:"payloadVersion"`
-}
-
 
 func GetSpotifyQueryResultFromRequest(ctx context.Context, r interface{}) (*QueryResultV2, error) {
 	if httpReq, ok := r.(*http.Request); ok {
