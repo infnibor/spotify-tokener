@@ -19,7 +19,7 @@ type QueryResult struct {
 	PayloadVersion    string          `json:"payloadVersion"`
 }
 
-func GetSpotifyQueryResultFromRequest(ctx context.Context, r interface{}) (*QueryResultV2, error) {
+func GetSpotifyQueryResultFromRequest(ctx context.Context, r interface{}) (*QueryResult, error) {
 	if httpReq, ok := r.(*http.Request); ok {
 		  playlist := httpReq.URL.Query().Get("playlist")
 		  return GetSpotifyQueryResult(ctx, playlist)
@@ -28,7 +28,7 @@ func GetSpotifyQueryResultFromRequest(ctx context.Context, r interface{}) (*Quer
 }
 
 // GetSpotifyQueryResult returns all info for the /api/query endpoint
-func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResultV2, error) {
+func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResult, error) {
        if playlistURI == "" {
 	       playlistURI = "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"
        }
@@ -118,26 +118,14 @@ func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResul
 			       }
 		       }
 
-		       if len(hashes) == 0 {
-			       return nil, errors.New("hash not found")
-		       }
-		       return &QueryResultV2{
-			       Hashes:            hashes,
-			       SpotifyAppVersion: appVersion,
-			       PayloadVersion:    payloadVersion,
-		       }, nil
-							       }
-						       }
-					       }
-				       } else {
-					       op := "getTrack"
-					       if o, ok := payload["operationName"].(string); ok {
-						       op = o
-					       }
-					       if ext, ok := payload["extensions"].(map[string]interface{}); ok {
-						       if pq, ok := ext["persistedQuery"].(map[string]interface{}); ok {
-							       if h, ok := pq["sha256Hash"].(string); ok {
-								       hashes = append(hashes, OperationHash{
+			       if len(hashes) == 0 {
+				       return nil, errors.New("hash not found")
+			       }
+			       return &QueryResult{
+				       Hashes:            hashes,
+				       SpotifyAppVersion: appVersion,
+				       PayloadVersion:    payloadVersion,
+			       }, nil
 									       Operation: op,
 									       Hash:      h,
 								       })
@@ -155,7 +143,7 @@ func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResul
 	       if len(hashes) == 0 {
 		       return nil, errors.New("hash not found")
 	       }
-	       return &QueryResultV2{
+	       return &QueryResult{
 		       Hashes:            hashes,
 		       SpotifyAppVersion: appVersion,
 		       PayloadVersion:    payloadVersion,
