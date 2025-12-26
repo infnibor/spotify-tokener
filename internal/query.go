@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 	"strconv"
+	"log"
 
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/cdproto/network"
@@ -152,16 +153,16 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 	// navigate and trigger reload to ensure requests fire
 	actions := []chromedp.Action{
 		chromedp.Navigate(pageURL),
-		chromedp.Sleep(700 * time.Millisecond),
+		chromedp.Sleep(2000 * time.Millisecond),
 		chromedp.Reload(),
-		chromedp.Sleep(1500 * time.Millisecond),
+		chromedp.Sleep(2500 * time.Millisecond),
 	}
 	if err := chromedp.Run(cctx, actions...); err != nil {
 		return nil, err
 	}
 
 	// wait a little more to allow background handlers to record requests
-	time.Sleep(1200 * time.Millisecond)
+	time.Sleep(1800 * time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -175,18 +176,11 @@ func processPostData(requestID string, postData string, mu *sync.Mutex, results 
 	// attempt to parse JSON body
 	var payload map[string]interface{}
 	if err := json.Unmarshal([]byte(postData), &payload); err != nil {
-		// cannot parse; ignore
-		return
-	}
-	op, _ := payload["operationName"].(string)
-	if op == "" {
-		return
-	}
-	if op != "getTrack" && op != "fetchPlaylistMetadata" {
+		log.Printf("[query] failed to unmarshal postData for %s: %v", requestID, err)
 		return
 	}
 
-	// dedupe by request id or sha
+	// dedupe by request id
 	key := requestID
 	mu.Lock()
 	if seen[key] {
@@ -195,6 +189,8 @@ func processPostData(requestID string, postData string, mu *sync.Mutex, results 
 	}
 	seen[key] = true
 	mu.Unlock()
+
+	op, _ := payload["operationName"].(string)
 
 	var vars map[string]interface{}
 	if v, ok := payload["variables"].(map[string]interface{}); ok {
@@ -226,6 +222,20 @@ func processPostData(requestID string, postData string, mu *sync.Mutex, results 
 			if vs, ok := v.(string); ok {
 				appVersion = vs
 			}
+		}
+	}
+
+	// Log captured info for debugging
+	log.Printf("[query] captured request %s op=%s sha=%v app=%s", requestID, op, func() string {
+		if pq != nil {
+			return pq.Sha256Hash
+		}
+		return ""
+	}(), appVersion)
+	// also log small payload summary
+	if op == "" {
+		if opGuess, ok := payload["operation"].(string); ok {
+			op = opGuess
 		}
 	}
 
