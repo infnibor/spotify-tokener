@@ -1,10 +1,10 @@
 package internal
 
+
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
