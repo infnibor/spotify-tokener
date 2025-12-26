@@ -36,28 +36,22 @@ func GetSpotifyQueryResultFromRequest(
 		return nil, errors.New("invalid request type")
 	}
 
-	playlist := httpReq.URL.Query().Get("playlist")
-	return GetSpotifyQueryResult(ctx, browser, playlist)
+	return GetSpotifyQueryResult(ctx, browser)
 }
 
 func GetSpotifyQueryResult(
 	ctx context.Context,
 	browser *Browser,
-	playlistURI string,
 ) (*QueryResult, error) {
 
 	if !browser.IsHealthy() {
 		return nil, errors.New("browser not healthy")
 	}
 
-	if playlistURI == "" {
-		playlistURI = "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"
-	}
-
 	tabCtx, cancel := chromedp.NewContext(browser.allocCtx)
 	defer cancel()
 
-	timeoutCtx, timeoutCancel := context.WithTimeout(tabCtx, 30*time.Second)
+	timeoutCtx, timeoutCancel := context.WithTimeout(tabCtx, 40*time.Second)
 	defer timeoutCancel()
 
 	var (
@@ -67,7 +61,7 @@ func GetSpotifyQueryResult(
 		payloadVersion string
 	)
 
-	// Rejestracja wszystkich requestów /pathfinder/v2/query
+	// Zbieramy WSZYSTKIE requesty /pathfinder/v2/query
 	chromedp.ListenTarget(timeoutCtx, func(ev interface{}) {
 		e, ok := ev.(*network.EventRequestWillBeSent)
 		if !ok {
@@ -88,8 +82,8 @@ func GetSpotifyQueryResult(
 		if appVersion == "" {
 			for k, v := range e.Request.Headers {
 				if strings.ToLower(k) == "spotify-app-version" {
-					if vs, ok := v.(string); ok && vs != "" {
-						appVersion = vs
+					if s, ok := v.(string); ok && s != "" {
+						appVersion = s
 						break
 					}
 				}
@@ -99,34 +93,38 @@ func GetSpotifyQueryResult(
 		mu.Unlock()
 	})
 
-	playlistURL := "https://open.spotify.com/playlist/" +
-		strings.TrimPrefix(playlistURI, "spotify:playlist:")
+	// Popularny track (często generuje dużo requestów)
+	trackURL := "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
 
-	// Symulacja odtwarzania kilku utworów
 	tasks := chromedp.Tasks{
 		network.Enable(),
-		chromedp.Navigate(playlistURL),
-		chromedp.Sleep(500 * time.Millisecond),
-	}
+		chromedp.Navigate(trackURL),
+		chromedp.Sleep(1 * time.Second),
 
-	for i := 0; i < 5; i++ {
-		tasks = append(tasks,
-			chromedp.Evaluate(`document.querySelector("button[data-testid='play-button']")?.click()`, nil),
-			chromedp.Sleep(50*time.Millisecond),
-		)
+		// klik Play
+		chromedp.Evaluate(
+			`document.querySelector("button[data-testid='play-button']")?.click()`,
+			nil,
+		),
+
+		// czekamy aż Spotify wyśle requesty
+		chromedp.Sleep(3 * time.Second),
+
+		// refresh strony
+		chromedp.Reload(),
+		chromedp.Sleep(3 * time.Second),
 	}
 
 	if err := chromedp.Run(timeoutCtx, tasks); err != nil {
 		return nil, err
 	}
 
-	// Poczekaj chwilę, aby wszystkie requesty zdążyły się wygenerować
-	time.Sleep(2 * time.Second)
+	var (
+		operations []OperationHash
+		seen       = make(map[string]struct{})
+	)
 
-	var operations []OperationHash
-	seen := make(map[string]struct{})
-
-	// Dopiero teraz przetwarzamy wszystkie zebrane requesty
+	// Przetwarzamy WSZYSTKIE zebrane requesty
 	for _, reqID := range requestIDs {
 		var postData string
 
@@ -161,9 +159,10 @@ func GetSpotifyQueryResult(
 
 		hash, _ := pq["sha256Hash"].(string)
 
-		// PayloadVersion z payloadu
-		if v, ok := pq["version"].(float64); ok && payloadVersion == "" {
-			payloadVersion = strconv.Itoa(int(v))
+		if payloadVersion == "" {
+			if v, ok := pq["version"].(float64); ok {
+				payloadVersion = strconv.Itoa(int(v))
+			}
 		}
 
 		if opName == "" || hash == "" {
@@ -171,7 +170,7 @@ func GetSpotifyQueryResult(
 		}
 
 		key := opName + ":" + hash
-		if _, exists := seen[key]; exists {
+		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = struct{}{}
@@ -180,13 +179,6 @@ func GetSpotifyQueryResult(
 			Operation: opName,
 			Hash:      hash,
 		})
-
-		// SpotifyAppVersion z payloadu jeśli jeszcze nie mamy wartości
-		if appVersion == "" {
-			if v, ok := payload["extensions"].(map[string]interface{})["spotifyAppVersion"].(string); ok && v != "" {
-				appVersion = v
-			}
-		}
 	}
 
 	if len(operations) == 0 {
