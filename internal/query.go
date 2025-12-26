@@ -15,6 +15,7 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/fetch"
 )
 
 type QueryResult struct {
@@ -141,8 +142,25 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 	if err := chromedp.Run(cctx, network.Enable()); err != nil {
 		log.Printf("[query] network.Enable failed: %v", err)
 	}
+	// enable Fetch interception for pathfinder requests to reliably access request bodies
+	if err := chromedp.Run(cctx, fetch.Enable().WithPatterns([]*fetch.RequestPattern{{URLPattern: "*pathfinder/v2/query*", RequestStage: fetch.RequestStageRequest}})); err != nil {
+		log.Printf("[query] fetch.Enable failed: %v", err)
+	}
 
 	chromedp.ListenTarget(cctx, func(ev interface{}) {
+		// fetch interception handler
+		if fev, ok := ev.(*fetch.EventRequestPaused); ok {
+			if strings.Contains(fev.Request.URL, "pathfinder/v2/query") {
+				pd := fev.Request.PostData
+				if pd != "" {
+					processPostData(fev.RequestID.String(), pd, &mu, &results, seen, nil)
+				}
+			}
+			// continue the request so page can proceed
+			_ = fetch.ContinueRequest(fev.RequestID).Do(cctx)
+			return
+		}
+
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.ToUpper(e.Request.Method) == "POST" {
 				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
@@ -366,12 +384,27 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 	if err := chromedp.Run(cctx, network.Enable()); err != nil {
 		log.Printf("[query] network.Enable failed (browser): %v", err)
 	}
+	// enable Fetch interception for pathfinder requests to reliably access request bodies
+	if err := chromedp.Run(cctx, fetch.Enable().WithPatterns([]*fetch.RequestPattern{{URLPattern: "*pathfinder/v2/query*", RequestStage: fetch.RequestStageRequest}})); err != nil {
+		log.Printf("[query] fetch.Enable failed (browser): %v", err)
+	}
 
 	var mu sync.Mutex
 	var results []*QueryPayloadResult
 	seen := map[string]bool{}
 
 	chromedp.ListenTarget(cctx, func(ev interface{}) {
+		// fetch interception handler
+		if fev, ok := ev.(*fetch.EventRequestPaused); ok {
+			if strings.Contains(fev.Request.URL, "pathfinder/v2/query") {
+				pd := fev.Request.PostData
+				if pd != "" {
+					processPostData(fev.RequestID.String(), pd, &mu, &results, seen, nil)
+				}
+			}
+			_ = fetch.ContinueRequest(fev.RequestID).Do(cctx)
+			return
+		}
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.ToUpper(e.Request.Method) == "POST" {
 				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
