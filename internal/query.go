@@ -84,13 +84,16 @@ func GetSpotifyQueryResult(
 		mu.Lock()
 		requestIDs = append(requestIDs, e.RequestID)
 
-		for k, v := range e.Request.Headers {
-			if strings.ToLower(k) == "spotify-app-version" {
-				if vs, ok := v.(string); ok {
-					appVersion = vs
+		if appVersion == "" {
+			for k, v := range e.Request.Headers {
+				if strings.ToLower(k) == "spotify-app-version" {
+					if vs, ok := v.(string); ok {
+						appVersion = vs
+					}
 				}
 			}
 		}
+
 		mu.Unlock()
 	})
 
@@ -100,12 +103,14 @@ func GetSpotifyQueryResult(
 	tasks := chromedp.Tasks{
 		network.Enable(),
 		chromedp.Navigate(playlistURL),
-		chromedp.Sleep(800 * time.Millisecond),
-		chromedp.Click(
-			"button[data-testid='play-button']",
-			chromedp.NodeVisible,
-		),
-		chromedp.Sleep(1500 * time.Millisecond),
+		chromedp.Sleep(200 * time.Millisecond),
+	}
+
+	for i := 0; i < 5; i++ {
+		tasks = append(tasks,
+			chromedp.Evaluate(`document.querySelector("button[data-testid='play-button']")?.click()`, nil),
+			chromedp.Sleep(50*time.Millisecond),
+		)
 	}
 
 	if err := chromedp.Run(timeoutCtx, tasks); err != nil {
@@ -167,6 +172,12 @@ func GetSpotifyQueryResult(
 			Operation: opName,
 			Hash:      hash,
 		})
+
+		if appVersion == "" {
+			if v, ok := payload["extensions"].(map[string]interface{})["spotifyAppVersion"].(string); ok {
+				appVersion = v
+			}
+		}
 	}
 
 	if len(operations) == 0 {
