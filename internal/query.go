@@ -1,3 +1,5 @@
+import (
+	"log"
 package internal
 
 
@@ -39,10 +41,12 @@ func GetSpotifyQueryResult(
 	browser *Browser,
 ) (*QueryResult, error) {
 
-	if !browser.IsHealthy() {
-		return nil, errors.New("browser not healthy")
-	}
+	       if !browser.IsHealthy() {
+		       log.Println("[ERROR] Browser not healthy")
+		       return nil, errors.New("browser not healthy")
+	       }
 
+	log.Println("[INFO] Tworzenie nowego kontekstu chromedp")
 	tabCtx, cancel := chromedp.NewContext(browser.allocCtx)
 	defer cancel()
 
@@ -57,6 +61,7 @@ func GetSpotifyQueryResult(
 	)
 
 	// Zbieramy WSZYSTKIE requesty /pathfinder/v2/query
+	log.Println("[INFO] Ustawianie nasłuchiwania na requesty /pathfinder/v2/query")
 	chromedp.ListenTarget(timeoutCtx, func(ev interface{}) {
 		e, ok := ev.(*network.EventRequestWillBeSent)
 		if !ok {
@@ -129,9 +134,11 @@ func GetSpotifyQueryResult(
 		chromedp.Sleep(3000 * time.Millisecond),
 	}
 
-	if err := chromedp.Run(timeoutCtx, tasks); err != nil {
-		return nil, err
-	}
+	       log.Println("[INFO] Uruchamianie sekwencji chromedp (logowanie, play, reload)")
+	       if err := chromedp.Run(timeoutCtx, tasks); err != nil {
+		       log.Printf("[ERROR] chromedp.Run: %v\n", err)
+		       return nil, err
+	       }
 
 	var (
 		operations []OperationHash
@@ -139,25 +146,29 @@ func GetSpotifyQueryResult(
 	)
 
 	// Przetwarzamy WSZYSTKIE zebrane requesty
+	log.Printf("[INFO] Przetwarzanie zebranych requestów: %d sztuk\n", len(requestIDs))
 	for _, reqID := range requestIDs {
 		var postData string
 
-		err := chromedp.Run(timeoutCtx, chromedp.ActionFunc(func(ctx context.Context) error {
-			pd, err := network.GetRequestPostData(reqID).Do(ctx)
-			if err != nil {
-				return err
-			}
-			postData = pd
-			return nil
-		}))
-		if err != nil || postData == "" {
-			continue
-		}
+		       err := chromedp.Run(timeoutCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+			       pd, err := network.GetRequestPostData(reqID).Do(ctx)
+			       if err != nil {
+				       log.Printf("[WARN] Nie udało się pobrać postData dla requestID %v: %v\n", reqID, err)
+				       return err
+			       }
+			       postData = pd
+			       return nil
+		       }))
+		       if err != nil || postData == "" {
+			       log.Printf("[WARN] Pusty postData lub błąd dla requestID %v\n", reqID)
+			       continue
+		       }
 
 		var payload map[string]interface{}
-		if err := json.Unmarshal([]byte(postData), &payload); err != nil {
-			continue
-		}
+		       if err := json.Unmarshal([]byte(postData), &payload); err != nil {
+			       log.Printf("[WARN] Nie udało się zdekodować JSON postData: %v\n", err)
+			       continue
+		       }
 
 		opName, _ := payload["operationName"].(string)
 
@@ -179,14 +190,16 @@ func GetSpotifyQueryResult(
 			}
 		}
 
-		if opName == "" || hash == "" {
-			continue
-		}
+		       if opName == "" || hash == "" {
+			       log.Printf("[WARN] Brak operationName lub hash w payloadzie: %+v\n", payload)
+			       continue
+		       }
 
 		key := opName + ":" + hash
-		if _, ok := seen[key]; ok {
-			continue
-		}
+		       if _, ok := seen[key]; ok {
+			       log.Printf("[INFO] Duplikat operation/hash: %s\n", key)
+			       continue
+		       }
 		seen[key] = struct{}{}
 
 		operations = append(operations, OperationHash{
@@ -195,13 +208,15 @@ func GetSpotifyQueryResult(
 		})
 	}
 
-	if len(operations) == 0 {
-		return nil, errors.New("no query hashes found")
-	}
+	       if len(operations) == 0 {
+		       log.Println("[ERROR] Nie znaleziono żadnych operation/hash")
+		       return nil, errors.New("no query hashes found")
+	       }
 
-	return &QueryResult{
-		Operations:        operations,
-		SpotifyAppVersion: appVersion,
-		PayloadVersion:    payloadVersion,
-	}, nil
+	       log.Printf("[INFO] Zwracam %d operation/hash\n", len(operations))
+	       return &QueryResult{
+		       Operations:        operations,
+		       SpotifyAppVersion: appVersion,
+		       PayloadVersion:    payloadVersion,
+	       }, nil
 }
