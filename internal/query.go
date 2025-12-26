@@ -152,10 +152,10 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 		if fev, ok := ev.(*fetch.EventRequestPaused); ok {
 			if strings.Contains(fev.Request.URL, "pathfinder/v2/query") {
 				ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2*time.Second)
-				pd, err := network.GetRequestPostData(network.RequestID(fev.RequestID.String())).Do(ctxWithTimeout)
+				pd, err := fetch.GetRequestPostData(fev.RequestID).Do(ctxWithTimeout)
 				cancelGet()
 				if err != nil {
-					log.Printf("[query] fetch GetRequestPostData error id=%s url=%s err=%v headers=%v", fev.RequestID, fev.Request.URL, err, fev.Request.Headers)
+					log.Printf("[query] fetch.GetRequestPostData error id=%s url=%s err=%v headers=%v", fev.RequestID, fev.Request.URL, err, fev.Request.Headers)
 				} else if pd != "" {
 					processPostData(fev.RequestID.String(), pd, &mu, &results, seen, fev.Request.Headers)
 				}
@@ -371,10 +371,10 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 		if fev, ok := ev.(*fetch.EventRequestPaused); ok {
 			if strings.Contains(fev.Request.URL, "pathfinder/v2/query") {
 				ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2*time.Second)
-				pd, err := network.GetRequestPostData(network.RequestID(fev.RequestID.String())).Do(ctxWithTimeout)
+				pd, err := fetch.GetRequestPostData(fev.RequestID).Do(ctxWithTimeout)
 				cancelGet()
 				if err != nil {
-					log.Printf("[query] fetch GetRequestPostData error id=%s url=%s err=%v headers=%v", fev.RequestID, fev.Request.URL, err, fev.Request.Headers)
+					log.Printf("[query] fetch.GetRequestPostData error id=%s url=%s err=%v headers=%v", fev.RequestID, fev.Request.URL, err, fev.Request.Headers)
 				} else if pd != "" {
 					processPostData(fev.RequestID.String(), pd, &mu, &results, seen, fev.Request.Headers)
 				}
