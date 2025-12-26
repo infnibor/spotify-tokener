@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,40 +25,40 @@ type QueryResult struct {
 	PayloadVersion    string          `json:"payloadVersion"`
 }
 
-func GetSpotifyQueryResultFromRequest(ctx context.Context, r interface{}) (*QueryResult, error) {
-	if httpReq, ok := r.(*http.Request); ok {
-		playlist := httpReq.URL.Query().Get("playlist")
-		return GetSpotifyQueryResult(ctx, playlist)
+func GetSpotifyQueryResultFromRequest(
+	ctx context.Context,
+	browser *Browser,
+	r interface{},
+) (*QueryResult, error) {
+
+	httpReq, ok := r.(*http.Request)
+	if !ok {
+		return nil, errors.New("invalid request type")
 	}
-	return nil, errors.New("invalid request type")
+
+	playlist := httpReq.URL.Query().Get("playlist")
+	return GetSpotifyQueryResult(ctx, browser, playlist)
 }
 
-func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResult, error) {
+func GetSpotifyQueryResult(
+	ctx context.Context,
+	browser *Browser,
+	playlistURI string,
+) (*QueryResult, error) {
+
+	if !browser.IsHealthy() {
+		return nil, errors.New("browser not healthy")
+	}
+
 	if playlistURI == "" {
 		playlistURI = "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"
 	}
 
-	browserBin := os.Getenv("HASH_BROWSER_BIN")
-
-	var allocCtx context.Context
-	var allocCancel context.CancelFunc
-
-	if browserBin != "" {
-		opts := append(
-			chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.ExecPath(browserBin),
-		)
-		allocCtx, allocCancel = chromedp.NewExecAllocator(ctx, opts...)
-	} else {
-		allocCtx, allocCancel = chromedp.NewExecAllocator(
-			ctx,
-			chromedp.DefaultExecAllocatorOptions[:]...,
-		)
-	}
-	defer allocCancel()
-
-	ctx, cancel := chromedp.NewContext(allocCtx)
+	tabCtx, cancel := chromedp.NewContext(browser.allocCtx)
 	defer cancel()
+
+	timeoutCtx, timeoutCancel := context.WithTimeout(tabCtx, 30*time.Second)
+	defer timeoutCancel()
 
 	var (
 		mu             sync.Mutex
@@ -68,7 +67,7 @@ func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResul
 		payloadVersion string
 	)
 
-	chromedp.ListenTarget(ctx, func(ev interface{}) {
+	chromedp.ListenTarget(timeoutCtx, func(ev interface{}) {
 		e, ok := ev.(*network.EventRequestWillBeSent)
 		if !ok {
 			return
@@ -98,15 +97,18 @@ func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResul
 	playlistURL := "https://open.spotify.com/playlist/" +
 		strings.TrimPrefix(playlistURI, "spotify:playlist:")
 
-	tasks := []chromedp.Action{
+	tasks := chromedp.Tasks{
 		network.Enable(),
 		chromedp.Navigate(playlistURL),
 		chromedp.Sleep(800 * time.Millisecond),
-		chromedp.Click("button[data-testid='play-button']", chromedp.NodeVisible),
+		chromedp.Click(
+			"button[data-testid='play-button']",
+			chromedp.NodeVisible,
+		),
 		chromedp.Sleep(1500 * time.Millisecond),
 	}
 
-	if err := chromedp.Run(ctx, tasks...); err != nil {
+	if err := chromedp.Run(timeoutCtx, tasks); err != nil {
 		return nil, err
 	}
 
@@ -116,7 +118,7 @@ func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResul
 	for _, reqID := range requestIDs {
 		var postData string
 
-		err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		err := chromedp.Run(timeoutCtx, chromedp.ActionFunc(func(ctx context.Context) error {
 			pd, err := network.GetRequestPostData(reqID).Do(ctx)
 			if err != nil {
 				return err
@@ -168,7 +170,7 @@ func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResul
 	}
 
 	if len(operations) == 0 {
-		return nil, errors.New("no hashes found")
+		return nil, errors.New("no query hashes found")
 	}
 
 	return &QueryResult{
