@@ -1,5 +1,6 @@
 package internal
 
+
 import (
 	"context"
 	"encoding/json"
@@ -10,6 +11,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/chromedp"
+)
 
 	       tasks := chromedp.Tasks{
 		       network.Enable(),
