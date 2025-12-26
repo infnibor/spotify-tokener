@@ -83,17 +83,17 @@ func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResul
 			}, nil
 		}
 	}
-	// fallback: return first
-	r := results[0]
+	// fallback to first result
+	first := results[0]
 	var hv string
 	var pv string
-	if r.PersistedQuery != nil {
-		hv = r.PersistedQuery.Sha256Hash
-		pv = strconv.Itoa(r.PersistedQuery.Version)
+	if first.PersistedQuery != nil {
+		hv = first.PersistedQuery.Sha256Hash
+		pv = strconv.Itoa(first.PersistedQuery.Version)
 	}
 	return &QueryResult{
 		Hash:              hv,
-		SpotifyAppVersion: r.SpotifyAppVersion,
+		SpotifyAppVersion: first.SpotifyAppVersion,
 		PayloadVersion:    pv,
 	}, nil
 }
@@ -151,9 +151,11 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 		// fetch interception handler
 		if fev, ok := ev.(*fetch.EventRequestPaused); ok {
 			if strings.Contains(fev.Request.URL, "pathfinder/v2/query") {
-				pd, err := fetch.GetRequestPostData(fev.RequestID).Do(cctx)
+				ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2*time.Second)
+				pd, err := network.GetRequestPostData(network.RequestID(fev.RequestID.String())).Do(ctxWithTimeout)
+				cancelGet()
 				if err != nil {
-					log.Printf("[query] fetch.GetRequestPostData error id=%s url=%s err=%v", fev.RequestID, fev.Request.URL, err)
+					log.Printf("[query] fetch GetRequestPostData error id=%s url=%s err=%v headers=%v", fev.RequestID, fev.Request.URL, err, fev.Request.Headers)
 				} else if pd != "" {
 					processPostData(fev.RequestID.String(), pd, &mu, &results, seen, fev.Request.Headers)
 				}
@@ -399,9 +401,11 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 		// fetch interception handler
 		if fev, ok := ev.(*fetch.EventRequestPaused); ok {
 			if strings.Contains(fev.Request.URL, "pathfinder/v2/query") {
-				pd, err := fetch.GetRequestPostData(fev.RequestID).Do(cctx)
+				ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2*time.Second)
+				pd, err := network.GetRequestPostData(network.RequestID(fev.RequestID.String())).Do(ctxWithTimeout)
+				cancelGet()
 				if err != nil {
-					log.Printf("[query] fetch.GetRequestPostData error id=%s url=%s err=%v", fev.RequestID, fev.Request.URL, err)
+					log.Printf("[query] fetch GetRequestPostData error id=%s url=%s err=%v headers=%v", fev.RequestID, fev.Request.URL, err, fev.Request.Headers)
 				} else if pd != "" {
 					processPostData(fev.RequestID.String(), pd, &mu, &results, seen, fev.Request.Headers)
 				}
