@@ -94,12 +94,31 @@ func GetSpotifyQueryResult(
 	})
 
 	// Popularny track (często generuje dużo requestów)
-	trackURL := "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
+	login := os.Getenv("SPOTIFY_LOGIN")
+	password := os.Getenv("SPOTIFY_PASSWORD")
 
 	tasks := chromedp.Tasks{
 		network.Enable(),
-		chromedp.Navigate(trackURL),
-		chromedp.Sleep(1 * time.Second),
+		chromedp.Navigate("https://open.spotify.com/login"),
+		chromedp.WaitVisible(`input#login-username`, chromedp.ByQuery),
+		chromedp.SetValue(`input#login-username`, login, chromedp.ByQuery),
+		// Jeśli pojawi się przycisk 'Podaj hasło, aby się zalogować', kliknij go
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			var exists bool
+			err := chromedp.Evaluate(`!!document.querySelector('button[data-encore-id="buttonTertiary"]')`, &exists).Do(ctx)
+			if err == nil && exists {
+				return chromedp.Click(`button[data-encore-id='buttonTertiary']`, chromedp.ByQuery).Do(ctx)
+			}
+			return nil
+		}),
+		chromedp.WaitVisible(`input[data-testid='login-password']`, chromedp.ByQuery),
+		chromedp.SetValue(`input[data-testid='login-password']`, password, chromedp.ByQuery),
+		chromedp.Click(`button[data-testid='login-button']`, chromedp.ByQuery),
+		chromedp.Sleep(5000 * time.Millisecond), // poczekaj na zalogowanie
+
+		// przejdź do popularnego tracka
+		chromedp.Navigate("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"),
+		chromedp.Sleep(1000 * time.Millisecond),
 
 		// klik Play
 		chromedp.Evaluate(
@@ -108,11 +127,11 @@ func GetSpotifyQueryResult(
 		),
 
 		// czekamy aż Spotify wyśle requesty
-		chromedp.Sleep(3 * time.Second),
+		chromedp.Sleep(3000 * time.Millisecond),
 
 		// refresh strony
 		chromedp.Reload(),
-		chromedp.Sleep(3 * time.Second),
+		chromedp.Sleep(3000 * time.Millisecond),
 	}
 
 	if err := chromedp.Run(timeoutCtx, tasks); err != nil {
