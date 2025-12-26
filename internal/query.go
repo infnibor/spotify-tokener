@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,12 +31,6 @@ func GetSpotifyQueryResultFromRequest(
 	browser *Browser,
 	r interface{},
 ) (*QueryResult, error) {
-
-	httpReq, ok := r.(*http.Request)
-	if !ok {
-		return nil, errors.New("invalid request type")
-	}
-
 	return GetSpotifyQueryResult(ctx, browser)
 }
 
