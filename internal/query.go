@@ -146,22 +146,32 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.ToUpper(e.Request.Method) == "POST" {
 				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
-				// fetch post data asynchronously using the request ID
+				// Only attempt fetching bodies for pathfinder queries to reduce noise/errors
+				if !strings.Contains(e.Request.URL, "pathfinder/v2/query") {
+					return
+				}
+				// fetch post data asynchronously using the request ID with retry/backoff
 				go func(reqID network.RequestID, headers network.Headers, url string) {
-					// Request.PostData is not available on this version of chromedp network.Request.
-					// Always fetch post data via CDP with a short timeout to avoid invalid contexts.
-					ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2*time.Second)
-					defer cancelGet()
-					pd, err := network.GetRequestPostData(reqID).Do(ctxWithTimeout)
+					var pd string
+					var err error
+					// retry a few times — sometimes the CDP backend is not ready immediately
+					for i := 0; i < 4; i++ {
+						ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 1500*time.Millisecond)
+						pd, err = network.GetRequestPostData(reqID).Do(ctxWithTimeout)
+						cancelGet()
+						if err == nil && pd != "" {
+							processPostData(reqID.String(), pd, &mu, &results, seen, headers)
+							return
+						}
+						// if error seems transient, wait and retry
+						time.Sleep(time.Duration(100+50*i) * time.Millisecond)
+					}
+					// final error log
 					if err != nil {
 						log.Printf("[query] GetRequestPostData error id=%s url=%s err=%v headers=%v", reqID, url, err, headers)
-						return
-					}
-					if pd == "" {
+					} else {
 						log.Printf("[query] empty postData id=%s url=%s headers=%v", reqID, url, headers)
-						return
 					}
-					processPostData(reqID.String(), pd, &mu, &results, seen, headers)
 				}(e.RequestID, e.Request.Headers, e.Request.URL)
 			}
 		}
@@ -366,19 +376,27 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.ToUpper(e.Request.Method) == "POST" {
 				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
+				if !strings.Contains(e.Request.URL, "pathfinder/v2/query") {
+					return
+				}
 				go func(reqID network.RequestID, headers network.Headers, url string) {
-					ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2*time.Second)
-					defer cancelGet()
-					pd, err := network.GetRequestPostData(reqID).Do(ctxWithTimeout)
+					var pd string
+					var err error
+					for i := 0; i < 4; i++ {
+						ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 1500*time.Millisecond)
+						pd, err = network.GetRequestPostData(reqID).Do(ctxWithTimeout)
+						cancelGet()
+						if err == nil && pd != "" {
+							processPostData(reqID.String(), pd, &mu, &results, seen, headers)
+							return
+						}
+						time.Sleep(time.Duration(100+50*i) * time.Millisecond)
+					}
 					if err != nil {
 						log.Printf("[query] GetRequestPostData error id=%s url=%s err=%v headers=%v", reqID, url, err, headers)
-						return
-					}
-					if pd == "" {
+					} else {
 						log.Printf("[query] empty postData id=%s url=%s headers=%v", reqID, url, headers)
-						return
 					}
-					processPostData(reqID.String(), pd, &mu, &results, seen, headers)
 				}(e.RequestID, e.Request.Headers, e.Request.URL)
 			}
 		}
