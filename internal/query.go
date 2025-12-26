@@ -147,8 +147,16 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 			if strings.ToUpper(e.Request.Method) == "POST" {
 				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
 				// fetch post data asynchronously using the request ID
-				go func(reqID network.RequestID, headers network.Headers, url string) {
-					pd, err := network.GetRequestPostData(reqID).Do(cctx)
+				go func(reqID network.RequestID, headers network.Headers, url string, postData string) {
+					// Prefer the PostData field from the event when available (more reliable).
+					if postData != "" {
+						processPostData(reqID.String(), postData, &mu, &results, seen, headers)
+						return
+					}
+					// Fallback: request post data via CDP with a short timeout to avoid invalid contexts.
+					ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2*time.Second)
+					defer cancelGet()
+					pd, err := network.GetRequestPostData(reqID).Do(ctxWithTimeout)
 					if err != nil {
 						log.Printf("[query] GetRequestPostData error id=%s url=%s err=%v headers=%v", reqID, url, err, headers)
 						return
@@ -158,7 +166,7 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 						return
 					}
 					processPostData(reqID.String(), pd, &mu, &results, seen, headers)
-				}(e.RequestID, e.Request.Headers, e.Request.URL)
+				}(e.RequestID, e.Request.Headers, e.Request.URL, e.Request.PostData)
 			}
 		}
 	})
@@ -362,8 +370,14 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.ToUpper(e.Request.Method) == "POST" {
 				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
-				go func(reqID network.RequestID, headers network.Headers, url string) {
-					pd, err := network.GetRequestPostData(reqID).Do(cctx)
+				go func(reqID network.RequestID, headers network.Headers, url string, postData string) {
+					if postData != "" {
+						processPostData(reqID.String(), postData, &mu, &results, seen, headers)
+						return
+					}
+					ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2*time.Second)
+					defer cancelGet()
+					pd, err := network.GetRequestPostData(reqID).Do(ctxWithTimeout)
 					if err != nil {
 						log.Printf("[query] GetRequestPostData error id=%s url=%s err=%v headers=%v", reqID, url, err, headers)
 						return
@@ -373,7 +387,7 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 						return
 					}
 					processPostData(reqID.String(), pd, &mu, &results, seen, headers)
-				}(e.RequestID, e.Request.Headers, e.Request.URL)
+				}(e.RequestID, e.Request.Headers, e.Request.URL, e.Request.PostData)
 			}
 		}
 	})
