@@ -275,25 +275,25 @@ func GetSpotifyQueryResultFromRequestWithBrowser(ctx context.Context, b *Browser
 	if len(results) == 0 {
 		return nil, errors.New("hash not found")
 	}
-	for _, r := range results {
-		if r.PersistedQuery != nil && r.PersistedQuery.Sha256Hash != "" {
+	for _, res := range results {
+		if res.PersistedQuery != nil && res.PersistedQuery.Sha256Hash != "" {
 			return &QueryResult{
-				Hash:              r.PersistedQuery.Sha256Hash,
-				SpotifyAppVersion: r.SpotifyAppVersion,
-				PayloadVersion:    strconv.Itoa(r.PersistedQuery.Version),
+				Hash:              res.PersistedQuery.Sha256Hash,
+				SpotifyAppVersion: res.SpotifyAppVersion,
+				PayloadVersion:    strconv.Itoa(res.PersistedQuery.Version),
 			}, nil
 		}
 	}
-	r := results[0]
+	first := results[0]
 	var hv string
 	var pv string
-	if r.PersistedQuery != nil {
-		hv = r.PersistedQuery.Sha256Hash
-		pv = strconv.Itoa(r.PersistedQuery.Version)
+	if first.PersistedQuery != nil {
+		hv = first.PersistedQuery.Sha256Hash
+		pv = strconv.Itoa(first.PersistedQuery.Version)
 	}
 	return &QueryResult{
 		Hash:              hv,
-		SpotifyAppVersion: r.SpotifyAppVersion,
+		SpotifyAppVersion: first.SpotifyAppVersion,
 		PayloadVersion:    pv,
 	}, nil
 }
