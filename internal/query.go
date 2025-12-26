@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,17 +24,12 @@ type QueryResult struct {
 	PayloadVersion    string          `json:"payloadVersion"`
 }
 
+// Funkcja uproszczona – nie używamy requestu HTTP
 func GetSpotifyQueryResultFromRequest(
 	ctx context.Context,
 	browser *Browser,
-	r interface{},
+	_ interface{},
 ) (*QueryResult, error) {
-
-	httpReq, ok := r.(*http.Request)
-	if !ok {
-		return nil, errors.New("invalid request type")
-	}
-
 	return GetSpotifyQueryResult(ctx, browser)
 }
 
@@ -61,7 +55,7 @@ func GetSpotifyQueryResult(
 		payloadVersion string
 	)
 
-	// Zbieramy WSZYSTKIE requesty /pathfinder/v2/query
+	// Zbieramy wszystkie requesty /pathfinder/v2/query
 	chromedp.ListenTarget(timeoutCtx, func(ev interface{}) {
 		e, ok := ev.(*network.EventRequestWillBeSent)
 		if !ok {
@@ -89,11 +83,10 @@ func GetSpotifyQueryResult(
 				}
 			}
 		}
-
 		mu.Unlock()
 	})
 
-	// Popularny track (często generuje dużo requestów)
+	// Popularny track – generuje dużo requestów
 	trackURL := "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
 
 	tasks := chromedp.Tasks{
@@ -159,10 +152,9 @@ func GetSpotifyQueryResult(
 
 		hash, _ := pq["sha256Hash"].(string)
 
-		if payloadVersion == "" {
-			if v, ok := pq["version"].(float64); ok {
-				payloadVersion = strconv.Itoa(int(v))
-			}
+		// PayloadVersion z payloadu
+		if v, ok := pq["version"].(float64); ok && payloadVersion == "" {
+			payloadVersion = strconv.Itoa(int(v))
 		}
 
 		if opName == "" || hash == "" {
