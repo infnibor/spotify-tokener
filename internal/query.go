@@ -1,12 +1,10 @@
-import (
-	"log"
 package internal
-
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 	"strconv"
 	"strings"
