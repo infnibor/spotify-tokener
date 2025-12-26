@@ -1,24 +1,26 @@
 package main
 
-import (
-    "context"
-    "encoding/json"
-    "net/http"
-    "os"
-    "os/signal"
-    "strconv"
-    "syscall"
-    "time"
 
-    "github.com/botxlab/spotokn/internal"
+import (
+       "context"
+       "encoding/json"
+       "net/http"
+       "os"
+       "os/signal"
+       "strconv"
+       "syscall"
+       "time"
+
+	"github.com/botxlab/spotokn/internal"
 )
 
 
 const (
-	defaultPort  = 8080
-	readTimeout  = 10 * time.Second
-	writeTimeout = 10 * time.Second
-	idleTimeout  = 120 * time.Second
+	defaultPort        = 8080
+	readTimeout        = 10 * time.Second
+	writeTimeout       = 10 * time.Second
+	idleTimeout        = 120 * time.Second
+	errMethodNotAllowed = "Method not allowed"
 )
 
 type Server struct {
@@ -37,20 +39,40 @@ func NewServer() *Server {
 		logger:       logger,
 	}
 
-	mux.HandleFunc("/api/token", server.handleToken)
-	mux.HandleFunc("/health", server.handleHealth)
-	mux.HandleFunc("/", server.handleNotFound)
+			   mux.HandleFunc("/api/token", server.handleToken)
+			   mux.HandleFunc("/api/query", server.handleHash)
+			   mux.HandleFunc("/health", server.handleHealth)
+			   mux.HandleFunc("/", server.handleNotFound)
 
-	port := getEnvInt("PORT", defaultPort)
-	server.httpServer = &http.Server{
-		Addr:         ":" + strconv.Itoa(port),
-		Handler:      mux,
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
-		IdleTimeout:  idleTimeout,
-	}
+	       port := getEnvInt("PORT", defaultPort)
+	       server.httpServer = &http.Server{
+		       Addr:         ":" + strconv.Itoa(port),
+		       Handler:      mux,
+		       ReadTimeout:  readTimeout,
+		       WriteTimeout: writeTimeout,
+		       IdleTimeout:  idleTimeout,
+	       }
 
-	return server
+	       return server
+}
+
+// GET /api/query?playlist=spotify:playlist:ID
+func (s *Server) handleHash(w http.ResponseWriter, r *http.Request) {
+		       if r.Method != http.MethodGet {
+			       s.respondError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
+			       return
+		       }
+	       ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	       defer cancel()
+	       result, err := internal.GetSpotifyQueryResultFromRequest(ctx, r)
+	       if err != nil {
+		       s.logger.Error("Hash fetch failed: " + err.Error())
+		       s.respondError(w, http.StatusServiceUnavailable, "Could not get hash")
+		       return
+	       }
+	       w.Header().Set("Content-Type", "application/json")
+	       w.WriteHeader(http.StatusOK)
+	       json.NewEncoder(w).Encode(result)
 }
 
 func (s *Server) Start() error {
@@ -70,10 +92,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		s.respondError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
+	       if r.Method != http.MethodGet {
+		       s.respondError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
+		       return
+	       }
 
 	query := r.URL.Query()
 	debug := query.Get("debug") == "true"
@@ -97,10 +119,10 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		s.respondError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
+	       if r.Method != http.MethodGet {
+		       s.respondError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
+		       return
+	       }
 
 	health := map[string]interface{}{
 		"status":    "healthy",
