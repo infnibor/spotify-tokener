@@ -151,9 +151,11 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 		// fetch interception handler
 		if fev, ok := ev.(*fetch.EventRequestPaused); ok {
 			if strings.Contains(fev.Request.URL, "pathfinder/v2/query") {
-				pd := fev.Request.PostData
-				if pd != "" {
-					processPostData(fev.RequestID.String(), pd, &mu, &results, seen, nil)
+				pd, err := fetch.GetRequestPostData(fev.RequestID).Do(cctx)
+				if err != nil {
+					log.Printf("[query] fetch.GetRequestPostData error id=%s url=%s err=%v", fev.RequestID, fev.Request.URL, err)
+				} else if pd != "" {
+					processPostData(fev.RequestID.String(), pd, &mu, &results, seen, fev.Request.Headers)
 				}
 			}
 			// continue the request so page can proceed
@@ -397,9 +399,11 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 		// fetch interception handler
 		if fev, ok := ev.(*fetch.EventRequestPaused); ok {
 			if strings.Contains(fev.Request.URL, "pathfinder/v2/query") {
-				pd := fev.Request.PostData
-				if pd != "" {
-					processPostData(fev.RequestID.String(), pd, &mu, &results, seen, nil)
+				pd, err := fetch.GetRequestPostData(fev.RequestID).Do(cctx)
+				if err != nil {
+					log.Printf("[query] fetch.GetRequestPostData error id=%s url=%s err=%v", fev.RequestID, fev.Request.URL, err)
+				} else if pd != "" {
+					processPostData(fev.RequestID.String(), pd, &mu, &results, seen, fev.Request.Headers)
 				}
 			}
 			_ = fetch.ContinueRequest(fev.RequestID).Do(cctx)
