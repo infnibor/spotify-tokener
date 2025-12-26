@@ -167,10 +167,12 @@ func GetSpotifyQueryResult(
 		}
 		seen[key] = struct{}{}
 
-		operations = append(operations, OperationHash{
-			Operation: opName,
-			Hash:      hash,
-		})
+		if opName == "getTrack" || opName == "getPlaylist" {
+			operations = append(operations, OperationHash{
+				Operation: opName,
+				Hash:      hash,
+			})
+		}
 	}
 
 	if len(operations) == 0 {
