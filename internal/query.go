@@ -70,9 +70,6 @@ func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResul
 									       if pq, ok := ext["persistedQuery"].(map[string]interface{}); ok {
 										       if h, ok := pq["sha256Hash"].(string); ok {
 											       allHashes = append(allHashes, OperationHash{
-												       Operation: op,
-												       Hash:      h,
-											       })
 										       }
 										       if v, ok := pq["version"].(float64); ok {
 											       payloadVersion = strconv.Itoa(int(v))
