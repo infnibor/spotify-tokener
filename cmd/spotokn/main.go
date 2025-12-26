@@ -67,11 +67,7 @@ func (s *Server) handleHash(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	result, err := internal.GetSpotifyQueryResultFromRequest(
-		ctx,
-		s.browser,
-		r,
-	)
+	result, err := internal.GetSpotifyQueryResultFromRequest(ctx, r)
 	if err != nil {
 		s.logger.Error("Hash fetch failed: " + err.Error())
 		s.respondError(w, http.StatusServiceUnavailable, "Could not get hash")
