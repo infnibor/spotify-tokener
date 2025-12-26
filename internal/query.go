@@ -7,8 +7,6 @@ import (
 	"os"
 	"net/http"
 	"strings"
-	"sync"
-	"time"
 	"strconv"
 
 	"github.com/chromedp/chromedp"
@@ -41,7 +39,7 @@ func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResul
 	       opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(browserBin))
 	       allocCtx, allocCancel = chromedp.NewExecAllocator(ctx, opts...)
        } else {
-	       allocCtx, allocCancel = chromedp.NewExecAllocator(ctx, chromedp.DefaultExecAllocatorOptions[:]...)
+
        }
        defer allocCancel()
        ctx, cancel := chromedp.NewContext(allocCtx)
