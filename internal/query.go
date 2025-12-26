@@ -221,13 +221,6 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 }
 
 func processPostData(requestID string, postData string, mu *sync.Mutex, results *[]*QueryPayloadResult, seen map[string]bool, headers network.Headers) {
-	// attempt to parse JSON body
-	var payload map[string]interface{}
-	if err := json.Unmarshal([]byte(postData), &payload); err != nil {
-		log.Printf("[query] failed to unmarshal postData for %s: %v", requestID, err)
-		return
-	}
-
 	// dedupe by request id
 	key := requestID
 	mu.Lock()
@@ -238,63 +231,39 @@ func processPostData(requestID string, postData string, mu *sync.Mutex, results 
 	seen[key] = true
 	mu.Unlock()
 
-	op, _ := payload["operationName"].(string)
-
-	var vars map[string]interface{}
-	if v, ok := payload["variables"].(map[string]interface{}); ok {
-		vars = v
+	// use the shared extractor helper to parse the payload and headers
+	qr, err := ExtractQueryResultFromPayload(postData, headers)
+	if err != nil {
+		log.Printf("[query] payload extractor error id=%s err=%v", requestID, err)
+		return
 	}
 
-	var ext map[string]interface{}
-	if e, ok := payload["extensions"].(map[string]interface{}); ok {
-		ext = e
-	}
-
-	var pq *PersistedQueryInfo
-	if ext != nil {
-		if pqiRaw, ok := ext["persistedQuery"].(map[string]interface{}); ok {
-			var p PersistedQueryInfo
-			if ver, ok := pqiRaw["version"].(float64); ok {
-				p.Version = int(ver)
-			}
-			if h, ok := pqiRaw["sha256Hash"].(string); ok {
-				p.Sha256Hash = h
-			}
-			pq = &p
+	// attempt to also capture operationName and raw payload for richer results
+	var rawPayload map[string]interface{}
+	var op string
+	if err := json.Unmarshal([]byte(postData), &rawPayload); err == nil {
+		if on, ok := rawPayload["operationName"].(string); ok {
+			op = on
+		} else if og, ok := rawPayload["operation"].(string); ok {
+			op = og
 		}
 	}
 
-	var appVersion string
-	for k, v := range headers {
-		if strings.ToLower(k) == "spotify-app-version" {
-			if vs, ok := v.(string); ok {
-				appVersion = vs
-			}
+	var ver int
+	if qr.PayloadVersion != "" {
+		if v, err := strconv.Atoi(qr.PayloadVersion); err == nil {
+			ver = v
 		}
 	}
 
-	// Log captured info for debugging
-	log.Printf("[query] captured request %s op=%s sha=%v app=%s", requestID, op, func() string {
-		if pq != nil {
-			return pq.Sha256Hash
-		}
-		return ""
-	}(), appVersion)
-	// also log small payload summary
-	if op == "" {
-		if opGuess, ok := payload["operation"].(string); ok {
-			op = opGuess
-		}
-	}
+	pq := &PersistedQueryInfo{Version: ver, Sha256Hash: qr.Hash}
 
 	qp := &QueryPayloadResult{
 		OperationName:     op,
-		Variables:         vars,
-		Extensions:        ext,
 		PersistedQuery:    pq,
-		SpotifyAppVersion: appVersion,
+		SpotifyAppVersion: qr.SpotifyAppVersion,
 		RequestID:         requestID,
-		RawPayload:        payload,
+		RawPayload:        rawPayload,
 	}
 
 	mu.Lock()
