@@ -154,19 +154,18 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 				go func(reqID network.RequestID, headers network.Headers, url string) {
 					var pd string
 					var err error
-					// retry a few times — sometimes the CDP backend is not ready immediately
-					for i := 0; i < 4; i++ {
-						ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 1500*time.Millisecond)
+					// retry several times — CDP can be slow to expose postData
+					for i := 0; i < 6; i++ {
+						ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2500*time.Millisecond)
 						pd, err = network.GetRequestPostData(reqID).Do(ctxWithTimeout)
 						cancelGet()
 						if err == nil && pd != "" {
 							processPostData(reqID.String(), pd, &mu, &results, seen, headers)
 							return
 						}
-						// if error seems transient, wait and retry
-						time.Sleep(time.Duration(100+50*i) * time.Millisecond)
+						// backoff between attempts
+						time.Sleep(time.Duration(150+150*i) * time.Millisecond)
 					}
-					// final error log
 					if err != nil {
 						log.Printf("[query] GetRequestPostData error id=%s url=%s err=%v headers=%v", reqID, url, err, headers)
 					} else {
@@ -180,16 +179,16 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 	// navigate and trigger reload to ensure requests fire
 	actions := []chromedp.Action{
 		chromedp.Navigate(pageURL),
-		chromedp.Sleep(2000 * time.Millisecond),
+		chromedp.Sleep(4000 * time.Millisecond),
 		chromedp.Reload(),
-		chromedp.Sleep(2500 * time.Millisecond),
+		chromedp.Sleep(4500 * time.Millisecond),
 	}
 	if err := chromedp.Run(cctx, actions...); err != nil {
 		return nil, err
 	}
 
 	// wait a little more to allow background handlers to record requests
-	time.Sleep(1800 * time.Millisecond)
+	time.Sleep(3500 * time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -382,15 +381,15 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 				go func(reqID network.RequestID, headers network.Headers, url string) {
 					var pd string
 					var err error
-					for i := 0; i < 4; i++ {
-						ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 1500*time.Millisecond)
+					for i := 0; i < 6; i++ {
+						ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2500*time.Millisecond)
 						pd, err = network.GetRequestPostData(reqID).Do(ctxWithTimeout)
 						cancelGet()
 						if err == nil && pd != "" {
 							processPostData(reqID.String(), pd, &mu, &results, seen, headers)
 							return
 						}
-						time.Sleep(time.Duration(100+50*i) * time.Millisecond)
+						time.Sleep(time.Duration(150+150*i) * time.Millisecond)
 					}
 					if err != nil {
 						log.Printf("[query] GetRequestPostData error id=%s url=%s err=%v headers=%v", reqID, url, err, headers)
@@ -404,15 +403,15 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 
 	actions := []chromedp.Action{
 		chromedp.Navigate(pageURL),
-		chromedp.Sleep(700 * time.Millisecond),
-		chromedp.Reload(),
 		chromedp.Sleep(1500 * time.Millisecond),
+		chromedp.Reload(),
+		chromedp.Sleep(3000 * time.Millisecond),
 	}
 	if err := chromedp.Run(cctx, actions...); err != nil {
 		return nil, err
 	}
 
-	time.Sleep(1200 * time.Millisecond)
+	time.Sleep(2500 * time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
