@@ -11,195 +11,127 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chromedp/cdproto/network"
-	"github.com/chromedp/chromedp"
-)
-
-type OperationHash struct {
-	Operation string `json:"operation"`
-	Hash      string `json:"hash"`
-}
-
-type QueryResult struct {
-	Operations        []OperationHash `json:"operations"`
-	SpotifyAppVersion string          `json:"spotifyAppVersion"`
-	PayloadVersion    string          `json:"payloadVersion"`
-}
-
-func GetSpotifyQueryResultFromRequest(
-	ctx context.Context,
-	browser *Browser,
-	r interface{},
-) (*QueryResult, error) {
-	return GetSpotifyQueryResult(ctx, browser)
-}
-
-func GetSpotifyQueryResult(
-	ctx context.Context,
-	browser *Browser,
-) (*QueryResult, error) {
-
-	       if !browser.IsHealthy() {
-		       log.Println("[ERROR] Browser not healthy")
-		       return nil, errors.New("browser not healthy")
+	       tasks := chromedp.Tasks{
+		       network.Enable(),
+		       chromedp.Navigate("https://open.spotify.com/track/5tCxCYuFA57AhVtHqxP7kr"),
+		       chromedp.Sleep(2000 * time.Millisecond),
+		       chromedp.Reload(),
+		       chromedp.Sleep(3000 * time.Millisecond),
 	       }
-
-	log.Println("[INFO] Tworzenie nowego kontekstu chromedp")
-	tabCtx, cancel := chromedp.NewContext(browser.allocCtx)
-	defer cancel()
-
-	timeoutCtx, timeoutCancel := context.WithTimeout(tabCtx, 40*time.Second)
-	defer timeoutCancel()
-
-	var (
-		mu             sync.Mutex
-		requestIDs     []network.RequestID
-		appVersion     string
-		payloadVersion string
-	)
-
-	// Zbieramy WSZYSTKIE requesty /pathfinder/v2/query
-	log.Println("[INFO] Ustawianie nasłuchiwania na requesty /pathfinder/v2/query")
-	chromedp.ListenTarget(timeoutCtx, func(ev interface{}) {
-		e, ok := ev.(*network.EventRequestWillBeSent)
-		if !ok {
-			return
-		}
-
-		if e.Request.Method != "POST" {
-			return
-		}
-
-		if !strings.Contains(e.Request.URL, "/pathfinder/v2/query") {
-			return
-		}
-
-		mu.Lock()
-		requestIDs = append(requestIDs, e.RequestID)
-
-		if appVersion == "" {
-			for k, v := range e.Request.Headers {
-				if strings.ToLower(k) == "spotify-app-version" {
-					if s, ok := v.(string); ok && s != "" {
-						appVersion = s
-						break
-					}
-				}
-			}
-		}
-
-		mu.Unlock()
-	})
-
-	// Popularny track (często generuje dużo requestów)
-	login := os.Getenv("SPOTIFY_LOGIN")
-	password := os.Getenv("SPOTIFY_PASSWORD")
-
-	tasks := chromedp.Tasks{
-		network.Enable(),
-		chromedp.Navigate("https://open.spotify.com/login"),
-		chromedp.WaitVisible(`input#login-username`, chromedp.ByQuery),
-		chromedp.SetValue(`input#login-username`, login, chromedp.ByQuery),
-		// Jeśli pojawi się przycisk 'Podaj hasło, aby się zalogować', kliknij go
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			var exists bool
-			err := chromedp.Evaluate(`!!document.querySelector('button[data-encore-id="buttonTertiary"]')`, &exists).Do(ctx)
-			if err == nil && exists {
-				return chromedp.Click(`button[data-encore-id='buttonTertiary']`, chromedp.ByQuery).Do(ctx)
-			}
-			return nil
-		}),
-		chromedp.WaitVisible(`input[data-testid='login-password']`, chromedp.ByQuery),
-		chromedp.SetValue(`input[data-testid='login-password']`, password, chromedp.ByQuery),
-		chromedp.Click(`button[data-testid='login-button']`, chromedp.ByQuery),
-		chromedp.Sleep(5000 * time.Millisecond), // poczekaj na zalogowanie
-
-		// przejdź do popularnego tracka
-		chromedp.Navigate("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"),
-		chromedp.Sleep(1000 * time.Millisecond),
-
-		// klik Play
-		chromedp.Evaluate(
-			`document.querySelector("button[data-testid='play-button']")?.click()`,
-			nil,
-		),
-
-		// czekamy aż Spotify wyśle requesty
-		chromedp.Sleep(3000 * time.Millisecond),
-
-		// refresh strony
-		chromedp.Reload(),
-		chromedp.Sleep(3000 * time.Millisecond),
-	}
-
-	       log.Println("[INFO] Uruchamianie sekwencji chromedp (logowanie, play, reload)")
-	       if err := chromedp.Run(timeoutCtx, tasks); err != nil {
-		       log.Printf("[ERROR] chromedp.Run: %v\n", err)
-		       return nil, err
-	       }
-
-	var (
-		operations []OperationHash
-		seen       = make(map[string]struct{})
-	)
-
-	// Przetwarzamy WSZYSTKIE zebrane requesty
-	log.Printf("[INFO] Przetwarzanie zebranych requestów: %d sztuk\n", len(requestIDs))
-	for _, reqID := range requestIDs {
-		var postData string
-
-		       err := chromedp.Run(timeoutCtx, chromedp.ActionFunc(func(ctx context.Context) error {
-			       pd, err := network.GetRequestPostData(reqID).Do(ctx)
-			       if err != nil {
-				       log.Printf("[WARN] Nie udało się pobrać postData dla requestID %v: %v\n", reqID, err)
-				       return err
-			       }
-			       postData = pd
+			       log.Println("[chromedp] SetValue: login-username")
 			       return nil
-		       }))
-		       if err != nil || postData == "" {
-			       log.Printf("[WARN] Pusty postData lub błąd dla requestID %v\n", reqID)
-			       continue
-		       }
+		       }),
+		       chromedp.SetValue(`input#login-username`, login, chromedp.ByQuery),
+		       chromedp.ActionFunc(func(ctx context.Context) error {
+			       log.Println("[chromedp] Check for tertiary button (Podaj hasło)")
+			       return nil
+		       }),
+		       // Jeśli pojawi się przycisk 'Podaj hasło, aby się zalogować', kliknij go
+		       chromedp.ActionFunc(func(ctx context.Context) error {
+			       var exists bool
+			       err := chromedp.Evaluate(`!!document.querySelector('button[data-encore-id="buttonTertiary"]')`, &exists).Do(ctx)
+			       if err == nil && exists {
+				       log.Println("[chromedp] Klikam: Podaj hasło, aby się zalogować")
+				       return chromedp.Click(`button[data-encore-id='buttonTertiary']`, chromedp.ByQuery).Do(ctx)
+			       }
+			       log.Println("[chromedp] Brak przycisku Podaj hasło, przechodzę dalej")
+			       return nil
+		       }),
+		       chromedp.ActionFunc(func(ctx context.Context) error {
+			       log.Println("[chromedp] WaitVisible: login-password")
+			       return nil
+		       }),
+		       chromedp.WaitVisible(`input[data-testid='login-password']`, chromedp.ByQuery),
+		       chromedp.ActionFunc(func(ctx context.Context) error {
+			       log.Println("[chromedp] SetValue: login-password")
+			       return nil
+		       }),
+		       chromedp.SetValue(`input[data-testid='login-password']`, password, chromedp.ByQuery),
+		       chromedp.ActionFunc(func(ctx context.Context) error {
+			       log.Println("[chromedp] Click: login-button")
+			       return nil
+		       }),
+		       chromedp.Click(`button[data-testid='login-button']`, chromedp.ByQuery),
+		       chromedp.ActionFunc(func(ctx context.Context) error {
+			       log.Println("[chromedp] Sleep: 5s na zalogowanie")
+			       return nil
+		       }),
+		       chromedp.Sleep(5000 * time.Millisecond), // poczekaj na zalogowanie
 
-		var payload map[string]interface{}
-		       if err := json.Unmarshal([]byte(postData), &payload); err != nil {
-			       log.Printf("[WARN] Nie udało się zdekodować JSON postData: %v\n", err)
-			       continue
-		       }
+		       chromedp.ActionFunc(func(ctx context.Context) error {
+			       log.Println("[chromedp] Navigate: popularny track")
+			       return nil
+		       }),
+		       // przejdź do popularnego tracka
+		       chromedp.Navigate("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"),
+		       chromedp.ActionFunc(func(ctx context.Context) error {
+			       log.Println("[chromedp] Sleep: 1s po tracku")
+			       return nil
+		       }),
+		       chromedp.Sleep(1000 * time.Millisecond),
 
-		opName, _ := payload["operationName"].(string)
+		       chromedp.ActionFunc(func(ctx context.Context) error {
+			       log.Println("[chromedp] Klikam Play")
+			       return nil
+		       }),
+		       // klik Play
+		       chromedp.Evaluate(
+			       `document.querySelector("button[data-testid='play-button']")?.click()`,
+			       nil,
+		       ),
 
-		ext, ok := payload["extensions"].(map[string]interface{})
-		if !ok {
-			continue
-		}
+		       chromedp.ActionFunc(func(ctx context.Context) error {
+			       log.Println("[chromedp] Sleep: 3s na requesty po Play")
+			       return nil
+		       }),
+		       // czekamy aż Spotify wyśle requesty
+		       chromedp.Sleep(3000 * time.Millisecond),
 
-		pq, ok := ext["persistedQuery"].(map[string]interface{})
-		if !ok {
-			continue
-		}
+		       chromedp.ActionFunc(func(ctx context.Context) error {
+			       log.Println("[chromedp] Reload strony")
+			       return nil
+			       var (
+				       results []map[string]interface{}
+			       )
 
-		hash, _ := pq["sha256Hash"].(string)
+			       for _, reqID := range requestIDs {
+				       var postData string
+				       err := chromedp.Run(timeoutCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+					       pd, err := network.GetRequestPostData(reqID).Do(ctx)
+					       if err != nil {
+						       log.Printf("[WARN] Nie udało się pobrać postData dla requestID %v: %v\n", reqID, err)
+						       return err
+					       }
+					       postData = pd
+					       return nil
+				       }))
+				       if err != nil || postData == "" {
+					       continue
+				       }
 
-		if payloadVersion == "" {
-			if v, ok := pq["version"].(float64); ok {
-				payloadVersion = strconv.Itoa(int(v))
-			}
-		}
+				       var payload map[string]interface{}
+				       if err := json.Unmarshal([]byte(postData), &payload); err != nil {
+					       continue
+				       }
 
-		       if opName == "" || hash == "" {
-			       log.Printf("[WARN] Brak operationName lub hash w payloadzie: %+v\n", payload)
-			       continue
-		       }
+				       opName, _ := payload["operationName"].(string)
+				       if opName == "getTrack" || opName == "fetchPlaylistMetadata" {
+					       log.Printf("[INFO] Złapano żądanie %s: %+v\n", opName, payload)
+					       results = append(results, payload)
+				       }
+			       }
 
-		key := opName + ":" + hash
-		       if _, ok := seen[key]; ok {
-			       log.Printf("[INFO] Duplikat operation/hash: %s\n", key)
-			       continue
-		       }
-		seen[key] = struct{}{}
+			       if len(results) == 0 {
+				       log.Println("[ERROR] Nie znaleziono żadnych żądań getTrack/fetchPlaylistMetadata")
+				       return nil, errors.New("no matching requests found")
+			       }
 
+			       // Zwróć wszystkie pełne payloady
+			       return &QueryResult{
+				       Operations:        nil,
+				       SpotifyAppVersion: appVersion,
+				       PayloadVersion:    payloadVersion,
+			       }, nil
 		operations = append(operations, OperationHash{
 			Operation: opName,
 			Hash:      hash,
