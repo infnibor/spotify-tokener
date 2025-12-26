@@ -1,89 +1,103 @@
 package main
 
-
 import (
-       "context"
-       "encoding/json"
-       "net/http"
-       "os"
-       "os/signal"
-       "strconv"
-       "syscall"
-       "time"
+	"context"
+	"encoding/json"
+	"net/http"
+	"os"
+	"os/signal"
+	"strconv"
+	"syscall"
+	"time"
 
 	"github.com/botxlab/spotokn/internal"
 )
 
-
 const (
-	defaultPort        = 8080
-	readTimeout        = 10 * time.Second
-	writeTimeout       = 10 * time.Second
-	idleTimeout        = 120 * time.Second
+	defaultPort         = 8080
+	readTimeout         = 10 * time.Second
+	writeTimeout        = 10 * time.Second
+	idleTimeout         = 120 * time.Second
 	errMethodNotAllowed = "Method not allowed"
 )
 
 type Server struct {
 	httpServer   *http.Server
 	tokenService *internal.TokenService
+	browser      *internal.Browser
 	logger       *internal.Logger
 }
 
 func NewServer() *Server {
 	logger := internal.NewLogger()
+	browser := internal.NewBrowser(logger)
 	tokenService := internal.NewTokenService(logger)
 
 	mux := http.NewServeMux()
 	server := &Server{
 		tokenService: tokenService,
+		browser:      browser,
 		logger:       logger,
 	}
 
-			   mux.HandleFunc("/api/token", server.handleToken)
-			   mux.HandleFunc("/api/query", server.handleHash)
-			   mux.HandleFunc("/health", server.handleHealth)
-			   mux.HandleFunc("/", server.handleNotFound)
+	mux.HandleFunc("/api/token", server.handleToken)
+	mux.HandleFunc("/api/query", server.handleHash)
+	mux.HandleFunc("/health", server.handleHealth)
+	mux.HandleFunc("/", server.handleNotFound)
 
-	       port := getEnvInt("PORT", defaultPort)
-	       server.httpServer = &http.Server{
-		       Addr:         ":" + strconv.Itoa(port),
-		       Handler:      mux,
-		       ReadTimeout:  readTimeout,
-		       WriteTimeout: writeTimeout,
-		       IdleTimeout:  idleTimeout,
-	       }
+	port := getEnvInt("PORT", defaultPort)
+	server.httpServer = &http.Server{
+		Addr:         ":" + strconv.Itoa(port),
+		Handler:      mux,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+		IdleTimeout:  idleTimeout,
+	}
 
-	       return server
+	return server
 }
 
 // GET /api/query?playlist=spotify:playlist:ID
 func (s *Server) handleHash(w http.ResponseWriter, r *http.Request) {
-		       if r.Method != http.MethodGet {
-			       s.respondError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
-			       return
-		       }
-	       ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	       defer cancel()
-	       result, err := internal.GetSpotifyQueryResultFromRequest(ctx, r)
-	       if err != nil {
-		       s.logger.Error("Hash fetch failed: " + err.Error())
-		       s.respondError(w, http.StatusServiceUnavailable, "Could not get hash")
-		       return
-	       }
-	       w.Header().Set("Content-Type", "application/json")
-	       w.WriteHeader(http.StatusOK)
-	       json.NewEncoder(w).Encode(result)
+	if r.Method != http.MethodGet {
+		s.respondError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	result, err := internal.GetSpotifyQueryResultFromRequest(
+		ctx,
+		s.browser,
+		r,
+	)
+	if err != nil {
+		s.logger.Error("Hash fetch failed: " + err.Error())
+		s.respondError(w, http.StatusServiceUnavailable, "Could not get hash")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(result)
 }
 
 func (s *Server) Start() error {
 	port := s.httpServer.Addr
-	s.logger.Info("Spotify Token Service started on port" + port)
+	s.logger.Info("Spotify Token Service started on port " + port)
 	return s.httpServer.ListenAndServe()
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.logger.Info("Shutting down gracefully...")
+
 	s.tokenService.Cleanup()
+
+	if s.browser != nil {
+		s.browser.Close()
+	}
+
 	err := s.httpServer.Shutdown(ctx)
 	if err == nil {
 		s.logger.Info("Shutdown complete")
@@ -92,10 +106,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
-	       if r.Method != http.MethodGet {
-		       s.respondError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
-		       return
-	       }
+	if r.Method != http.MethodGet {
+		s.respondError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
+		return
+	}
 
 	query := r.URL.Query()
 	debug := query.Get("debug") == "true"
@@ -108,7 +122,6 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 
 	cookies := parseCookies(r)
 	token, err := s.tokenService.GetToken(cookies)
-
 	if err != nil || token == nil {
 		s.logger.Error("Token fetch failed: " + err.Error())
 		s.respondError(w, http.StatusServiceUnavailable, "Service temporarily unavailable")
@@ -119,10 +132,10 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	       if r.Method != http.MethodGet {
-		       s.respondError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
-		       return
-	       }
+	if r.Method != http.MethodGet {
+		s.respondError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
+		return
+	}
 
 	health := map[string]interface{}{
 		"status":    "healthy",
