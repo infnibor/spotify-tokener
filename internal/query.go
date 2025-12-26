@@ -135,6 +135,13 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 	var results []*QueryPayloadResult
 	seen := map[string]bool{}
 
+	// enable network domain so we can retrieve request post data
+	_ = chromedp.Run
+	_ = network.Enable
+	if err := chromedp.Run(cctx, network.Enable()); err != nil {
+		log.Printf("[query] network.Enable failed: %v", err)
+	}
+
 	chromedp.ListenTarget(cctx, func(ev interface{}) {
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.ToUpper(e.Request.Method) == "POST" {
@@ -341,6 +348,11 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 	// create a new chromedp context that shares the browser allocator
 	cctx, cancel := chromedp.NewContext(b.allocCtx)
 	defer cancel()
+
+	// enable network domain on this context
+	if err := chromedp.Run(cctx, network.Enable()); err != nil {
+		log.Printf("[query] network.Enable failed (browser): %v", err)
+	}
 
 	var mu sync.Mutex
 	var results []*QueryPayloadResult
