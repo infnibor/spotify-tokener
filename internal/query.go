@@ -137,7 +137,8 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 
 	chromedp.ListenTarget(cctx, func(ev interface{}) {
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
-			if strings.Contains(e.Request.URL, "/pathfinder/v2/query") && strings.ToUpper(e.Request.Method) == "POST" {
+			if strings.ToUpper(e.Request.Method) == "POST" {
+				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
 				// fetch post data asynchronously using the request ID
 				go func(reqID network.RequestID, headers network.Headers) {
 					pd, err := network.GetRequestPostData(reqID).Do(cctx)
@@ -342,7 +343,8 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 
 	chromedp.ListenTarget(cctx, func(ev interface{}) {
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
-			if strings.Contains(e.Request.URL, "/pathfinder/v2/query") && strings.ToUpper(e.Request.Method) == "POST" {
+			if strings.ToUpper(e.Request.Method) == "POST" {
+				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
 				go func(reqID network.RequestID, headers network.Headers) {
 					pd, err := network.GetRequestPostData(reqID).Do(cctx)
 					if err != nil || pd == "" {
