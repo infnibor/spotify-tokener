@@ -147,13 +147,9 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 			if strings.ToUpper(e.Request.Method) == "POST" {
 				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
 				// fetch post data asynchronously using the request ID
-				go func(reqID network.RequestID, headers network.Headers, url string, postData string) {
-					// Prefer the PostData field from the event when available (more reliable).
-					if postData != "" {
-						processPostData(reqID.String(), postData, &mu, &results, seen, headers)
-						return
-					}
-					// Fallback: request post data via CDP with a short timeout to avoid invalid contexts.
+				go func(reqID network.RequestID, headers network.Headers, url string) {
+					// Request.PostData is not available on this version of chromedp network.Request.
+					// Always fetch post data via CDP with a short timeout to avoid invalid contexts.
 					ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2*time.Second)
 					defer cancelGet()
 					pd, err := network.GetRequestPostData(reqID).Do(ctxWithTimeout)
@@ -166,7 +162,7 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 						return
 					}
 					processPostData(reqID.String(), pd, &mu, &results, seen, headers)
-				}(e.RequestID, e.Request.Headers, e.Request.URL, e.Request.PostData)
+				}(e.RequestID, e.Request.Headers, e.Request.URL)
 			}
 		}
 	})
@@ -370,11 +366,7 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.ToUpper(e.Request.Method) == "POST" {
 				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
-				go func(reqID network.RequestID, headers network.Headers, url string, postData string) {
-					if postData != "" {
-						processPostData(reqID.String(), postData, &mu, &results, seen, headers)
-						return
-					}
+				go func(reqID network.RequestID, headers network.Headers, url string) {
 					ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2*time.Second)
 					defer cancelGet()
 					pd, err := network.GetRequestPostData(reqID).Do(ctxWithTimeout)
@@ -387,7 +379,7 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 						return
 					}
 					processPostData(reqID.String(), pd, &mu, &results, seen, headers)
-				}(e.RequestID, e.Request.Headers, e.Request.URL, e.Request.PostData)
+				}(e.RequestID, e.Request.Headers, e.Request.URL)
 			}
 		}
 	})
