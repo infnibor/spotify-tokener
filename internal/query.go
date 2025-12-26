@@ -39,8 +39,25 @@ type QueryPayloadResult struct {
 
 func GetSpotifyQueryResultFromRequest(ctx context.Context, r interface{}) (*QueryResult, error) {
 	if httpReq, ok := r.(*http.Request); ok {
-		playlist := httpReq.URL.Query().Get("playlist")
-		return GetSpotifyQueryResult(ctx, playlist)
+		q := httpReq.URL.Query()
+		val := q.Get("playlist")
+		if val == "" {
+			val = q.Get("uri")
+		}
+		if val == "" {
+			val = q.Get("track")
+		}
+		if val == "" {
+			// accept full URL via url or q
+			val = q.Get("url")
+		}
+		if val == "" {
+			val = q.Get("q")
+		}
+		if val == "" {
+			return nil, errors.New("empty uri")
+		}
+		return GetSpotifyQueryResult(ctx, val)
 	}
 	return nil, errors.New("invalid request type")
 }
