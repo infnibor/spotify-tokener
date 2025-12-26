@@ -120,22 +120,14 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 	chromedp.ListenTarget(cctx, func(ev interface{}) {
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.Contains(e.Request.URL, "/pathfinder/v2/query") && strings.ToUpper(e.Request.Method) == "POST" {
-				// get post data (may be present on the event)
-				var postData string
-				if e.Request.PostData != "" {
-					postData = e.Request.PostData
-				} else {
-					// attempt to fetch it asynchronously
-					go func(reqID network.RequestID) {
-						pd, err := network.GetRequestPostData(reqID).Do(cctx)
-						if err != nil || pd == "" {
-							return
-						}
-						processPostData(reqID.String(), pd, &mu, &results, seen, e.Request.Headers)
-					}(e.RequestID)
-					return
-				}
-				processPostData(e.RequestID.String(), postData, &mu, &results, seen, e.Request.Headers)
+				// fetch post data asynchronously using the request ID
+				go func(reqID network.RequestID, headers network.Headers) {
+					pd, err := network.GetRequestPostData(reqID).Do(cctx)
+					if err != nil || pd == "" {
+						return
+					}
+					processPostData(reqID.String(), pd, &mu, &results, seen, headers)
+				}(e.RequestID, e.Request.Headers)
 			}
 		}
 	})
@@ -162,7 +154,7 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 	return results, nil
 }
 
-func processPostData(requestID string, postData string, mu *sync.Mutex, results *[]*QueryPayloadResult, seen map[string]bool, headers map[string]interface{}) {
+func processPostData(requestID string, postData string, mu *sync.Mutex, results *[]*QueryPayloadResult, seen map[string]bool, headers network.Headers) {
 	// attempt to parse JSON body
 	var payload map[string]interface{}
 	if err := json.Unmarshal([]byte(postData), &payload); err != nil {
