@@ -243,3 +243,123 @@ func processPostData(requestID string, postData string, mu *sync.Mutex, results 
 	*results = append(*results, qp)
 	mu.Unlock()
 }
+
+// GetSpotifyQueryResultFromRequestWithBrowser behaves like GetSpotifyQueryResultFromRequest
+// but reuses an existing Browser instance (to preserve login/session) when capturing requests.
+func GetSpotifyQueryResultFromRequestWithBrowser(ctx context.Context, b *Browser, r *http.Request) (*QueryResult, error) {
+	if r == nil {
+		return nil, errors.New("invalid request")
+	}
+	q := r.URL.Query()
+	val := q.Get("playlist")
+	if val == "" {
+		val = q.Get("uri")
+	}
+	if val == "" {
+		val = q.Get("track")
+	}
+	if val == "" {
+		val = q.Get("url")
+	}
+	if val == "" {
+		val = q.Get("q")
+	}
+	if val == "" {
+		return nil, errors.New("empty uri")
+	}
+
+	results, err := GetSpotifyQueryResultsWithBrowser(ctx, b, val)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, errors.New("hash not found")
+	}
+	for _, r := range results {
+		if r.PersistedQuery != nil && r.PersistedQuery.Sha256Hash != "" {
+			return &QueryResult{
+				Hash:              r.PersistedQuery.Sha256Hash,
+				SpotifyAppVersion: r.SpotifyAppVersion,
+				PayloadVersion:    strconv.Itoa(r.PersistedQuery.Version),
+			}, nil
+		}
+	}
+	r := results[0]
+	var hv string
+	var pv string
+	if r.PersistedQuery != nil {
+		hv = r.PersistedQuery.Sha256Hash
+		pv = strconv.Itoa(r.PersistedQuery.Version)
+	}
+	return &QueryResult{
+		Hash:              hv,
+		SpotifyAppVersion: r.SpotifyAppVersion,
+		PayloadVersion:    pv,
+	}, nil
+}
+
+// GetSpotifyQueryResultsWithBrowser reuses the provided Browser (shares allocator/context)
+// so any existing session/cookies are available when visiting the page.
+func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyURI string) ([]*QueryPayloadResult, error) {
+	if spotifyURI == "" {
+		return nil, errors.New("empty uri")
+	}
+	if b == nil || !b.IsHealthy() {
+		return nil, errors.New("browser unavailable")
+	}
+
+	// normalize to path
+	var pageURL string
+	if strings.HasPrefix(spotifyURI, "spotify:track:") {
+		id := strings.TrimPrefix(spotifyURI, "spotify:track:")
+		pageURL = "https://open.spotify.com/track/" + id
+	} else if strings.HasPrefix(spotifyURI, "spotify:playlist:") {
+		id := strings.TrimPrefix(spotifyURI, "spotify:playlist:")
+		pageURL = "https://open.spotify.com/playlist/" + id
+	} else if strings.Contains(spotifyURI, "open.spotify.com/track/") || strings.Contains(spotifyURI, "open.spotify.com/playlist/") {
+		pageURL = spotifyURI
+	} else {
+		return nil, errors.New("unsupported uri format")
+	}
+
+	// create a new chromedp context that shares the browser allocator
+	cctx, cancel := chromedp.NewContext(b.allocCtx)
+	defer cancel()
+
+	var mu sync.Mutex
+	var results []*QueryPayloadResult
+	seen := map[string]bool{}
+
+	chromedp.ListenTarget(cctx, func(ev interface{}) {
+		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
+			if strings.Contains(e.Request.URL, "/pathfinder/v2/query") && strings.ToUpper(e.Request.Method) == "POST" {
+				go func(reqID network.RequestID, headers network.Headers) {
+					pd, err := network.GetRequestPostData(reqID).Do(cctx)
+					if err != nil || pd == "" {
+						return
+					}
+					processPostData(reqID.String(), pd, &mu, &results, seen, headers)
+				}(e.RequestID, e.Request.Headers)
+			}
+		}
+	})
+
+	actions := []chromedp.Action{
+		chromedp.Navigate(pageURL),
+		chromedp.Sleep(700 * time.Millisecond),
+		chromedp.Reload(),
+		chromedp.Sleep(1500 * time.Millisecond),
+	}
+	if err := chromedp.Run(cctx, actions...); err != nil {
+		return nil, err
+	}
+
+	time.Sleep(1200 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(results) == 0 {
+		return nil, errors.New("no matching pathfinder queries found")
+	}
+	return results, nil
+}

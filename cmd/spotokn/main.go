@@ -70,7 +70,7 @@ func (s *Server) handleHash(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	debug := query.Get("debug") == "true"
 
-	result, err := internal.GetSpotifyQueryResultFromRequest(ctx, r)
+	result, err := internal.GetSpotifyQueryResultFromRequestWithBrowser(ctx, s.browser, r)
 	if err != nil {
 		s.logger.Error("Hash fetch failed: " + err.Error())
 		if debug {
