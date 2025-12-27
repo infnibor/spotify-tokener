@@ -24,7 +24,7 @@ type MetadataResult struct {
 type metadataConfig struct {
 	operationName string
 	url           string
-	waitTime      time.Duration
+	waitTime      time.Duration // How long to wait after navigation
 }
 
 var metadataConfigs = map[string]metadataConfig{
@@ -60,8 +60,8 @@ var metadataConfigs = map[string]metadataConfig{
 	},
 	"artistOverview": {
 		operationName: "queryArtistOverview",
-		url:           "https://open.spotify.com/artist/4mxWe1mtYIYfP040G38yvS", // Example artist
-		waitTime:      2 * time.Second,
+		url:           "https://open.spotify.com/artist/0C0XlULifJtAgn6ZNCW2eu", // The Killers
+		waitTime:      3 * time.Second,
 	},
 }
 
@@ -88,6 +88,7 @@ func NewMetadataService(logger *Logger) *MetadataService {
 		cacheTTL:  30 * time.Minute,
 	}
 
+	// Initialize browser allocator once for reuse
 	ms.initializeBrowser()
 
 	return ms
@@ -157,12 +158,14 @@ func (ms *MetadataService) fetchMetadata(ctx context.Context, config metadataCon
 	browserCtx, browserCancel := chromedp.NewContext(ms.allocCtx)
 	defer browserCancel()
 
+	// Set timeout for the entire operation
 	timeoutCtx, timeoutCancel := context.WithTimeout(browserCtx, 30*time.Second)
 	defer timeoutCancel()
 
 	var mu sync.Mutex
 	capturedRequests := make([]capturedRequest, 0)
 
+	// Listen for network requests
 	chromedp.ListenTarget(timeoutCtx, func(ev interface{}) {
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.Contains(e.Request.URL, "/pathfinder/v2/query") && e.Request.Method == "POST" {
@@ -190,6 +193,7 @@ func (ms *MetadataService) fetchMetadata(ctx context.Context, config metadataCon
 
 	ms.logger.Infof("Navigating to: %s", config.url)
 
+	// Simple navigation and wait - no complex interactions needed
 	tasks := []chromedp.Action{
 		chromedp.Navigate(config.url),
 		chromedp.Sleep(config.waitTime),
@@ -239,11 +243,20 @@ func (ms *MetadataService) fetchMetadata(ctx context.Context, config metadataCon
 			continue
 		}
 
+		// Extract operation name for debugging
+		var name map[string]interface{}
+		if err := json.Unmarshal([]byte(postData), &name); err == nil {
+			if opName, ok := name["operationName"].(string); ok {
+				ms.logger.Debugf("Request %d operation: %s (looking for: %s)", i+1, opName, config.operationName)
+			}
+		}
+
+		// Check if this is the operation we're looking for
 		if !strings.Contains(postData, config.operationName) {
-			ms.logger.Debugf("Request %d is not for operation %s", i+1, config.operationName)
 			continue
 		}
 
+		// Found the right request! Parse it
 		ms.logger.Infof("Found matching request for operation: %s", config.operationName)
 
 		var payload map[string]interface{}
