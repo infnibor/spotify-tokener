@@ -203,7 +203,7 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 	chromedp.ListenTarget(cctx, func(ev interface{}) {
 		// fetch interception handler
 		if fev, ok := ev.(*fetch.EventRequestPaused); ok {
-			   if strings.Contains(fev.Request.URL, pathfinderQuery) {
+			   if fev.Request.URL == "https://api-partner.spotify.com/pathfinder/v2/query" {
 				ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2*time.Second)
 				pd, err := network.GetRequestPostData(network.RequestID(fev.RequestID.String())).Do(ctxWithTimeout)
 				cancelGet()
@@ -222,9 +222,9 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 			if strings.ToUpper(e.Request.Method) == "POST" {
 				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
 				// Only attempt fetching bodies for pathfinder queries to reduce noise/errors
-				   if !strings.Contains(e.Request.URL, pathfinderQuery) {
-					return
-				}
+				       if e.Request.URL != "https://api-partner.spotify.com/pathfinder/v2/query" {
+					       return
+				       }
 				// fetch post data asynchronously using the request ID with retry/backoff
 				go func(reqID network.RequestID, headers network.Headers, url string) {
 					var pd string
@@ -435,7 +435,7 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 	chromedp.ListenTarget(cctx, func(ev interface{}) {
 		// fetch interception handler
 		if fev, ok := ev.(*fetch.EventRequestPaused); ok {
-			   if strings.Contains(fev.Request.URL, pathfinderQuery) {
+			   if fev.Request.URL == "https://api-partner.spotify.com/pathfinder/v2/query" {
 				ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2*time.Second)
 				pd, err := network.GetRequestPostData(network.RequestID(fev.RequestID.String())).Do(ctxWithTimeout)
 				cancelGet()
@@ -451,9 +451,9 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.ToUpper(e.Request.Method) == "POST" {
 				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
-				   if !strings.Contains(e.Request.URL, pathfinderQuery) {
-					return
-				}
+				       if e.Request.URL != "https://api-partner.spotify.com/pathfinder/v2/query" {
+					       return
+				       }
 				go func(reqID network.RequestID, headers network.Headers, url string) {
 					var pd string
 					var err error
