@@ -41,16 +41,16 @@ func GetSpotifyQueryResultsFromRequest(ctx context.Context, r *http.Request) ([]
        }
        // Zwróć wynik jak GetSpotifyQueryResults, ale bez chromedp
        // Tu można dodać własną logikę, np. zwrócić QueryPayloadResult z samym URI
-       return []*QueryPayloadResult{{
-	       OperationName:     "direct-request",
-	       PersistedQuery:    nil,
-	       SpotifyAppVersion: "",
-	       RequestID:         "",
-	       RawPayload:        map[string]interface{}{ "uri": uri },
-       }}, nil
+	       return []*QueryPayloadResult{{
+		       OperationName:     "direct-request",
+		       PersistedQuery:    nil,
+		       SpotifyAppVersion: "",
+		       RequestID:         "",
+		       RawPayload:        map[string]interface{}{ "uri": uri },
+	       }}, nil
+	}
 
-
-const (
+	const (
 	errEmptyURI           = "empty uri"
 	prefixTrack           = "spotify:track:"
 	prefixAlbum           = "spotify:album:"
