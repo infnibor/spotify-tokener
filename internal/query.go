@@ -214,8 +214,9 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.ToUpper(e.Request.Method) == "POST" {
-				   log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
-				   // Only attempt fetching bodies for pathfinder queries to reduce noise/errors
+				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
+				// Only attempt fetching bodies for pathfinder queries to reduce noise/errors
+								OperationName:     r.OperationName,
 				if !strings.Contains(e.Request.URL, "pathfinder/v2/query") {
 					return
 				}
@@ -229,8 +230,9 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 						pd, err = network.GetRequestPostData(reqID).Do(ctxWithTimeout)
 						cancelGet()
 						if err == nil && pd != "" {
-							       processPostData(reqID.String(), pd, &mu, &results, seen, headers)
-							       return
+							processPostData(reqID.String(), pd, &mu, &results, seen, headers)
+							return
+						OperationName:     first.OperationName,
 						}
 						// backoff between attempts
 						time.Sleep(time.Duration(150+150*i) * time.Millisecond)
