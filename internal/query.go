@@ -287,15 +287,19 @@ func processPostData(requestID string, postData string, mu *sync.Mutex, results 
 	}
 
 	// attempt to also capture operationName and raw payload for richer results
-	var rawPayload map[string]interface{}
-	var op string
-	if err := json.Unmarshal([]byte(postData), &rawPayload); err == nil {
-		if on, ok := rawPayload["operationName"].(string); ok {
-			op = on
-		} else if og, ok := rawPayload["operation"].(string); ok {
-			op = og
-		}
-	}
+	       var rawPayload map[string]interface{}
+	       var op string
+	       if err := json.Unmarshal([]byte(postData), &rawPayload); err == nil {
+		       if on, ok := rawPayload["operationName"].(string); ok {
+			       op = on
+		       } else if og, ok := rawPayload["operation"].(string); ok {
+			       op = og
+		       }
+		       log.Printf("[query] parsed operationName=%s for requestID=%s", op, requestID)
+	       } else {
+		       log.Printf("[query] failed to unmarshal postData for requestID=%s: %v", requestID, err)
+	       }
+	       log.Printf("[query] rawPayload for requestID=%s: %+v", requestID, rawPayload)
 
 	var ver int
 	if qr.PayloadVersion != "" {
