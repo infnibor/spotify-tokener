@@ -1,5 +1,34 @@
 
+
 package internal
+var (
+	globalHashManager = NewHashManager()
+)
+
+// Scraper function for HashManager: scrapes the hash for the given type by visiting a sample URI
+func scrapeHash(ctx context.Context, ht HashType) (string, error) {
+	var sampleURI string
+	switch ht {
+	case HashTrack:
+		sampleURI = "spotify:track:11dFghVXANMlKmJXsNCbNl" // Example track URI
+	case HashAlbum:
+		sampleURI = "spotify:album:1ATL5GLyefJaxhQzSPVrLX" // Example album URI
+	case HashPlaylist:
+		sampleURI = "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M" // Example playlist URI
+	default:
+		return "", errors.New("unknown hash type")
+	}
+	results, err := GetSpotifyQueryResults(ctx, sampleURI)
+	if err != nil || len(results) == 0 {
+		return "", errors.New("could not scrape hash for " + ht.String())
+	}
+	for _, r := range results {
+		if r.PersistedQuery != nil && r.PersistedQuery.Sha256Hash != "" {
+			return r.PersistedQuery.Sha256Hash, nil
+		}
+	}
+	return "", errors.New("no hash found in scrape for " + ht.String())
+}
 
 import (
 	"context"
@@ -278,50 +307,63 @@ func GetSpotifyQueryResultFromRequestWithBrowser(ctx context.Context, b *Browser
 		return nil, errors.New("invalid request")
 	}
 	q := r.URL.Query()
-	val := q.Get("playlist")
-	if val == "" {
-		val = q.Get("uri")
-	}
-	if val == "" {
-		val = q.Get("track")
-	}
-	if val == "" {
-		val = q.Get("url")
-	}
-	if val == "" {
-		val = q.Get("q")
-	}
-	if val == "" {
-		return nil, errors.New("empty uri")
-	}
-
-	results, err := GetSpotifyQueryResultsWithBrowser(ctx, b, val)
-	if err != nil {
-		return nil, err
-	}
-	if len(results) == 0 {
-		return nil, errors.New("hash not found")
-	}
-	for _, res := range results {
-		if res.PersistedQuery != nil && res.PersistedQuery.Sha256Hash != "" {
-			return &QueryResult{
-				Hash:              res.PersistedQuery.Sha256Hash,
-				SpotifyAppVersion: res.SpotifyAppVersion,
-				PayloadVersion:    strconv.Itoa(res.PersistedQuery.Version),
-			}, nil
+	var hashType HashType
+	var found bool
+	var uri string
+	if val := q.Get("track"); val != "" {
+		hashType = HashTrack
+		uri = val
+		found = true
+	} else if val := q.Get("album"); val != "" {
+		hashType = HashAlbum
+		uri = val
+		found = true
+	} else if val := q.Get("playlist"); val != "" {
+		hashType = HashPlaylist
+		uri = val
+		found = true
+	} else if val := q.Get("uri"); val != "" {
+		// Guess type from uri
+		uri = val
+		if strings.HasPrefix(uri, "spotify:track:") {
+			hashType = HashTrack
+			found = true
+		} else if strings.HasPrefix(uri, "spotify:album:") {
+			hashType = HashAlbum
+			found = true
+		} else if strings.HasPrefix(uri, "spotify:playlist:") {
+			hashType = HashPlaylist
+			found = true
+		}
+	} else if val := q.Get("url"); val != "" {
+		uri = val
+		if strings.Contains(uri, "/track/") {
+			hashType = HashTrack
+			found = true
+		} else if strings.Contains(uri, "/album/") {
+			hashType = HashAlbum
+			found = true
+		} else if strings.Contains(uri, "/playlist/") {
+			hashType = HashPlaylist
+			found = true
 		}
 	}
-	first := results[0]
-	var hv string
-	var pv string
-	if first.PersistedQuery != nil {
-		hv = first.PersistedQuery.Sha256Hash
-		pv = strconv.Itoa(first.PersistedQuery.Version)
+	if !found || uri == "" {
+		return nil, errors.New("empty or unknown uri type")
 	}
+
+	// Use HashManager to get or update the hash for this type
+	hash, err := globalHashManager.UpdateHashIfNeeded(ctx, hashType, scrapeHash)
+	if err != nil || hash == "" {
+		return nil, errors.New("could not get valid hash for " + hashType.String())
+	}
+
+	// Optionally, you can still scrape the actual URI for the latest app version/payload version if needed
+	// For now, just return the hash
 	return &QueryResult{
-		Hash:              hv,
-		SpotifyAppVersion: first.SpotifyAppVersion,
-		PayloadVersion:    pv,
+		Hash: hash,
+		SpotifyAppVersion: "",
+		PayloadVersion:    "",
 	}, nil
 }
 
