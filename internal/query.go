@@ -1,3 +1,10 @@
+const (
+	errEmptyURI           = "empty uri"
+	prefixTrack           = "spotify:track:"
+	prefixAlbum           = "spotify:album:"
+	prefixPlaylist        = "spotify:playlist:"
+	pathfinderQuery       = "pathfinder/v2/query"
+)
 
 
 package internal
@@ -86,9 +93,9 @@ func GetSpotifyQueryResultFromRequest(ctx context.Context, r interface{}) (*Quer
 		if val == "" {
 			val = q.Get("q")
 		}
-		if val == "" {
-			return nil, errors.New("empty uri")
-		}
+		       if val == "" {
+			       return nil, errors.New(errEmptyURI)
+		       }
 		return GetSpotifyQueryResult(ctx, val)
 	}
 	return nil, errors.New("invalid request type")
@@ -132,25 +139,25 @@ func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResul
 // captures all POST requests to /pathfinder/v2/query whose payload contains
 // operationName "getTrack" or "fetchPlaylistMetadata". Returns parsed payloads.
 func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPayloadResult, error) {
-	if spotifyURI == "" {
-		return nil, errors.New("empty uri")
-	}
+	       if spotifyURI == "" {
+		       return nil, errors.New(errEmptyURI)
+	       }
 	// normalize to path
-	var pageURL string
-	       if strings.HasPrefix(spotifyURI, "spotify:track:") {
-		       id := strings.TrimPrefix(spotifyURI, "spotify:track:")
+	       var pageURL string
+	       if strings.HasPrefix(spotifyURI, prefixTrack) {
+		       id := strings.TrimPrefix(spotifyURI, prefixTrack)
 		       if idx := strings.Index(id, "?"); idx != -1 {
 			       id = id[:idx]
 		       }
 		       pageURL = "https://open.spotify.com/track/" + id
-	       } else if strings.HasPrefix(spotifyURI, "spotify:album:") {
-		       id := strings.TrimPrefix(spotifyURI, "spotify:album:")
+	       } else if strings.HasPrefix(spotifyURI, prefixAlbum) {
+		       id := strings.TrimPrefix(spotifyURI, prefixAlbum)
 		       if idx := strings.Index(id, "?"); idx != -1 {
 			       id = id[:idx]
 		       }
 		       pageURL = "https://open.spotify.com/album/" + id
-	       } else if strings.HasPrefix(spotifyURI, "spotify:playlist:") {
-		       id := strings.TrimPrefix(spotifyURI, "spotify:playlist:")
+	       } else if strings.HasPrefix(spotifyURI, prefixPlaylist) {
+		       id := strings.TrimPrefix(spotifyURI, prefixPlaylist)
 		       if idx := strings.Index(id, "?"); idx != -1 {
 			       id = id[:idx]
 		       }
@@ -189,14 +196,14 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 		log.Printf("[query] network.Enable failed: %v", err)
 	}
 	// enable Fetch interception for pathfinder requests to reliably access request bodies
-	if err := chromedp.Run(cctx, fetch.Enable().WithPatterns([]*fetch.RequestPattern{{URLPattern: "*pathfinder/v2/query*", RequestStage: fetch.RequestStageRequest}})); err != nil {
-		log.Printf("[query] fetch.Enable failed: %v", err)
-	}
+	       if err := chromedp.Run(cctx, fetch.Enable().WithPatterns([]*fetch.RequestPattern{{URLPattern: "*" + pathfinderQuery + "*", RequestStage: fetch.RequestStageRequest}})); err != nil {
+		       log.Printf("[query] fetch.Enable failed: %v", err)
+	       }
 
 	chromedp.ListenTarget(cctx, func(ev interface{}) {
 		// fetch interception handler
 		if fev, ok := ev.(*fetch.EventRequestPaused); ok {
-			if strings.Contains(fev.Request.URL, "pathfinder/v2/query") {
+			   if strings.Contains(fev.Request.URL, pathfinderQuery) {
 				ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2*time.Second)
 				pd, err := network.GetRequestPostData(network.RequestID(fev.RequestID.String())).Do(ctxWithTimeout)
 				cancelGet()
@@ -215,7 +222,7 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 			if strings.ToUpper(e.Request.Method) == "POST" {
 				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
 				// Only attempt fetching bodies for pathfinder queries to reduce noise/errors
-				if !strings.Contains(e.Request.URL, "pathfinder/v2/query") {
+				   if !strings.Contains(e.Request.URL, pathfinderQuery) {
 					return
 				}
 				// fetch post data asynchronously using the request ID with retry/backoff
@@ -365,15 +372,15 @@ func GetSpotifyQueryResultFromRequestWithBrowser(ctx context.Context, b *Browser
 			found = true
 		}
 	}
-	if !found || uri == "" {
-		return nil, errors.New("empty or unknown uri type")
-	}
+	       if !found || uri == "" {
+		       return nil, errors.New("empty or unknown uri type")
+	       }
 
 	// Use HashManager to get or update the hash for this type
-	hash, err := globalHashManager.UpdateHashIfNeeded(ctx, hashType, scrapeHash)
-	if err != nil || hash == "" {
-		return nil, errors.New("could not get valid hash for " + hashType.String())
-	}
+	       hash, err := globalHashManager.UpdateHashIfNeeded(ctx, hashType, scrapeHash)
+	       if err != nil || hash == "" {
+		       return nil, errors.New("could not get valid hash for " + hashType.String())
+	       }
 
 	// Optionally, you can still scrape the actual URI for the latest app version/payload version if needed
 	// For now, just return the hash
@@ -387,26 +394,26 @@ func GetSpotifyQueryResultFromRequestWithBrowser(ctx context.Context, b *Browser
 // GetSpotifyQueryResultsWithBrowser reuses the provided Browser (shares allocator/context)
 // so any existing session/cookies are available when visiting the page.
 func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyURI string) ([]*QueryPayloadResult, error) {
-	if spotifyURI == "" {
-		return nil, errors.New("empty uri")
-	}
+	       if spotifyURI == "" {
+		       return nil, errors.New(errEmptyURI)
+	       }
 	if b == nil || !b.IsHealthy() {
 		return nil, errors.New("browser unavailable")
 	}
 
 	// normalize to path
 	var pageURL string
-	if strings.HasPrefix(spotifyURI, "spotify:track:") {
-		id := strings.TrimPrefix(spotifyURI, "spotify:track:")
-		pageURL = "https://open.spotify.com/track/" + id
-	} else if strings.HasPrefix(spotifyURI, "spotify:playlist:") {
-		id := strings.TrimPrefix(spotifyURI, "spotify:playlist:")
-		pageURL = "https://open.spotify.com/playlist/" + id
-	} else if strings.Contains(spotifyURI, "open.spotify.com/track/") || strings.Contains(spotifyURI, "open.spotify.com/playlist/") {
-		pageURL = spotifyURI
-	} else {
-		return nil, errors.New("unsupported uri format")
-	}
+	       if strings.HasPrefix(spotifyURI, prefixTrack) {
+		       id := strings.TrimPrefix(spotifyURI, prefixTrack)
+		       pageURL = "https://open.spotify.com/track/" + id
+	       } else if strings.HasPrefix(spotifyURI, prefixPlaylist) {
+		       id := strings.TrimPrefix(spotifyURI, prefixPlaylist)
+		       pageURL = "https://open.spotify.com/playlist/" + id
+	       } else if strings.Contains(spotifyURI, "open.spotify.com/track/") || strings.Contains(spotifyURI, "open.spotify.com/playlist/") {
+		       pageURL = spotifyURI
+	       } else {
+		       return nil, errors.New("unsupported uri format")
+	       }
 
 	// create a new chromedp context that shares the browser allocator
 	cctx, cancel := chromedp.NewContext(b.allocCtx)
@@ -417,9 +424,9 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 		log.Printf("[query] network.Enable failed (browser): %v", err)
 	}
 	// enable Fetch interception for pathfinder requests to reliably access request bodies
-	if err := chromedp.Run(cctx, fetch.Enable().WithPatterns([]*fetch.RequestPattern{{URLPattern: "*pathfinder/v2/query*", RequestStage: fetch.RequestStageRequest}})); err != nil {
-		log.Printf("[query] fetch.Enable failed (browser): %v", err)
-	}
+	       if err := chromedp.Run(cctx, fetch.Enable().WithPatterns([]*fetch.RequestPattern{{URLPattern: "*" + pathfinderQuery + "*", RequestStage: fetch.RequestStageRequest}})); err != nil {
+		       log.Printf("[query] fetch.Enable failed (browser): %v", err)
+	       }
 
 	var mu sync.Mutex
 	var results []*QueryPayloadResult
@@ -428,7 +435,7 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 	chromedp.ListenTarget(cctx, func(ev interface{}) {
 		// fetch interception handler
 		if fev, ok := ev.(*fetch.EventRequestPaused); ok {
-			if strings.Contains(fev.Request.URL, "pathfinder/v2/query") {
+			   if strings.Contains(fev.Request.URL, pathfinderQuery) {
 				ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2*time.Second)
 				pd, err := network.GetRequestPostData(network.RequestID(fev.RequestID.String())).Do(ctxWithTimeout)
 				cancelGet()
@@ -444,7 +451,7 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.ToUpper(e.Request.Method) == "POST" {
 				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
-				if !strings.Contains(e.Request.URL, "pathfinder/v2/query") {
+				   if !strings.Contains(e.Request.URL, pathfinderQuery) {
 					return
 				}
 				go func(reqID network.RequestID, headers network.Headers, url string) {
