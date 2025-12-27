@@ -1,3 +1,23 @@
+
+package internal
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+	"strconv"
+	"log"
+
+	"github.com/chromedp/chromedp"
+	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/fetch"
+)
+
 // GetSpotifyQueryResultsFromRequest pobiera payload bezpośrednio z HTTP requesta (query params), bez chromedp.
 func GetSpotifyQueryResultsFromRequest(ctx context.Context, r *http.Request) ([]*QueryPayloadResult, error) {
        if r == nil {
