@@ -14,10 +14,6 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-/* =========================
-   PUBLIC STRUCTS
-   ========================= */
-
 type QueryResult struct {
 	Hash              string `json:"hash"`
 	SpotifyAppVersion string `json:"spotifyAppVersion"`
@@ -100,10 +96,12 @@ func processPostData(
 	stateAny, _ := requestStates.LoadOrStore(requestID, &requestState{})
 	state := stateAny.(*requestState)
 
-	// ---- operationName ----
+	/* ---- operationName extraction ---- */
+
 	if op, ok := raw["operationName"].(string); ok && op != "" {
 		state.OperationName = op
 	}
+
 	if state.OperationName == "" {
 		if ext, ok := raw["extensions"].(map[string]interface{}); ok {
 			if op, ok := ext["operationName"].(string); ok && op != "" {
@@ -111,11 +109,13 @@ func processPostData(
 			}
 		}
 	}
+
 	if state.OperationName == "" {
 		findOperationName(raw, state)
 	}
 
-	// ---- hash ----
+	/* ---- hash extraction ---- */
+
 	if ext, ok := raw["extensions"].(map[string]interface{}); ok {
 		if pq, ok := ext["persistedQuery"].(map[string]interface{}); ok {
 			if h, ok := pq["sha256Hash"].(string); ok {
@@ -153,7 +153,7 @@ func processPostData(
 }
 
 /* =========================
-   CORE SCRAPER
+   MAIN SCRAPER
    ========================= */
 
 func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPayloadResult, error) {
@@ -186,10 +186,17 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 	cctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
-	_ = chromedp.Run(cctx, network.Enable())
-	_ = chromedp.Run(cctx, fetch.Enable().WithPatterns([]*fetch.RequestPattern{
-		{URLPattern: "*pathfinder/v2/query*", RequestStage: fetch.RequestStageRequest},
-	}))
+	if err := chromedp.Run(cctx, network.Enable()); err != nil {
+		return nil, err
+	}
+
+	if err := chromedp.Run(cctx,
+		fetch.Enable().WithPatterns([]*fetch.RequestPattern{
+			{URLPattern: "*pathfinder/v2/query*", RequestStage: fetch.RequestStageRequest},
+		}),
+	); err != nil {
+		return nil, err
+	}
 
 	var mu sync.Mutex
 	var results []*QueryPayloadResult
@@ -198,7 +205,8 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 	chromedp.ListenTarget(cctx, func(ev interface{}) {
 		if fev, ok := ev.(*fetch.EventRequestPaused); ok {
 			if strings.Contains(fev.Request.URL, "pathfinder/v2/query") {
-				pd, _ := network.GetRequestPostData(network.RequestID(fev.RequestID.String())).Do(cctx)
+				pd, _ := network.GetRequestPostData(network.RequestID(fev.RequestID.String())).
+					Do(cctx)
 				if pd != "" {
 					processPostData(fev.RequestID.String(), pd, &mu, &results, seen, fev.Request.Headers)
 				}
@@ -207,13 +215,13 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 		}
 	})
 
-	err := chromedp.Run(
-		cctx,
+	err := chromedp.Run(cctx,
 		chromedp.Navigate(pageURL),
 		chromedp.Sleep(4*time.Second),
 		chromedp.Reload(),
 		chromedp.Sleep(5*time.Second),
 	)
+
 	if err != nil {
 		return nil, err
 	}
@@ -223,41 +231,6 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 	if len(results) == 0 {
 		return nil, errors.New("no queries captured")
 	}
+
 	return results, nil
-}
-
-/* =========================
-   BACKWARD COMPAT API
-   ========================= */
-
-func GetSpotifyQueryResultFromRequestWithBrowser(
-	ctx context.Context,
-	b *Browser,
-	r *http.Request,
-) (*QueryResult, error) {
-	q := r.URL.Query()
-	uri := q.Get("uri")
-	if uri == "" {
-		uri = q.Get("playlist")
-	}
-	if uri == "" {
-		uri = q.Get("track")
-	}
-	if uri == "" {
-		return nil, errors.New("empty uri")
-	}
-
-	results, err := GetSpotifyQueryResults(ctx, uri)
-	if err != nil || len(results) == 0 {
-		return nil, errors.New("no query result")
-	}
-
-	r0 := results[0]
-	return &QueryResult{
-		Hash:          r0.PersistedQuery.Sha256Hash,
-		OperationName: r0.OperationName,
-		PayloadVersion: func() string {
-			return ""
-		}(),
-	}, nil
 }
