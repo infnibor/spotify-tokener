@@ -1,3 +1,34 @@
+// GetSpotifyQueryResultsFromRequest pobiera payload bezpośrednio z HTTP requesta (query params), bez chromedp.
+func GetSpotifyQueryResultsFromRequest(ctx context.Context, r *http.Request) ([]*QueryPayloadResult, error) {
+       if r == nil {
+	       return nil, errors.New("invalid request")
+       }
+       q := r.URL.Query()
+       var uri string
+       if val := q.Get("track"); val != "" {
+	       uri = val
+       } else if val := q.Get("album"); val != "" {
+	       uri = val
+       } else if val := q.Get("playlist"); val != "" {
+	       uri = val
+       } else if val := q.Get("uri"); val != "" {
+	       uri = val
+       } else if val := q.Get("url"); val != "" {
+	       uri = val
+       }
+       if uri == "" {
+	       return nil, errors.New(errEmptyURI)
+       }
+       // Zwróć wynik jak GetSpotifyQueryResults, ale bez chromedp
+       // Tu można dodać własną logikę, np. zwrócić QueryPayloadResult z samym URI
+       return []*QueryPayloadResult{{
+	       OperationName:     "direct-request",
+	       PersistedQuery:    nil,
+	       SpotifyAppVersion: "",
+	       RequestID:         "",
+	       RawPayload:        map[string]interface{}{ "uri": uri },
+       }}, nil
+}
 
 package internal
 
@@ -77,28 +108,39 @@ type QueryPayloadResult struct {
 }
 
 func GetSpotifyQueryResultFromRequest(ctx context.Context, r interface{}) (*QueryResult, error) {
-	if httpReq, ok := r.(*http.Request); ok {
-		q := httpReq.URL.Query()
-		val := q.Get("playlist")
-		if val == "" {
-			val = q.Get("uri")
-		}
-		if val == "" {
-			val = q.Get("track")
-		}
-		if val == "" {
-			// accept full URL via url or q
-			val = q.Get("url")
-		}
-		if val == "" {
-			val = q.Get("q")
-		}
+	       if httpReq, ok := r.(*http.Request); ok {
+		       // Najpierw spróbuj pobrać payload bezpośrednio z requesta (jak w handleHash)
+		       results, err := GetSpotifyQueryResultsFromRequest(ctx, httpReq)
+		       if err == nil && len(results) > 0 {
+			       // Zwróć pierwszy wynik (możesz rozwinąć logikę jeśli potrzeba)
+			       return &QueryResult{
+				       Hash:              "",
+				       SpotifyAppVersion: "",
+				       PayloadVersion:    "",
+			       }, nil
+		       }
+		       // fallback do starego zachowania (chromedp)
+		       q := httpReq.URL.Query()
+		       val := q.Get("playlist")
+		       if val == "" {
+			       val = q.Get("uri")
+		       }
+		       if val == "" {
+			       val = q.Get("track")
+		       }
+		       if val == "" {
+			       // accept full URL via url or q
+			       val = q.Get("url")
+		       }
+		       if val == "" {
+			       val = q.Get("q")
+		       }
 		       if val == "" {
 			       return nil, errors.New(errEmptyURI)
 		       }
-		return GetSpotifyQueryResult(ctx, val)
-	}
-	return nil, errors.New("invalid request type")
+		       return GetSpotifyQueryResult(ctx, val)
+	       }
+	       return nil, errors.New("invalid request type")
 }
 
 // GetSpotifyQueryResult returns the first found info for the /api/query endpoint (backwards compatible)
