@@ -22,24 +22,26 @@ const (
 )
 
 type Server struct {
-	httpServer   *http.Server
-	tokenService *internal.TokenService
-	logger       *internal.Logger
+	httpServer      *http.Server
+	tokenService    *internal.TokenService
+	metadataService *internal.MetadataService
+	logger          *internal.Logger
 }
 
 func NewServer() *Server {
 	logger := internal.NewLogger()
 	tokenService := internal.NewTokenService(logger)
+	metadataService := internal.NewMetadataService(logger)
 
 	mux := http.NewServeMux()
 	server := &Server{
-		tokenService: tokenService,
-		logger:       logger,
+		tokenService:    tokenService,
+		metadataService: metadataService,
+		logger:          logger,
 	}
 
 	mux.HandleFunc("/api/token", server.handleToken)
-	mux.HandleFunc("/api/query", server.handleHash)
-	mux.HandleFunc("/api/metadata", server.handleMetaData)
+	mux.HandleFunc("/api/metadata", server.handleMetadata)
 	mux.HandleFunc("/health", server.handleHealth)
 	mux.HandleFunc("/", server.handleNotFound)
 
@@ -55,52 +57,47 @@ func NewServer() *Server {
 	return server
 }
 
-// GET /api/query?playlist=spotify:playlist:ID
-func (s *Server) handleHash(w http.ResponseWriter, r *http.Request) {
+// GET /api/metadata?type=playlist|track|album|playlistMetadata|trackRecommender
+func (s *Server) handleMetadata(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.respondError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	result, err := internal.GetSpotifyQueryResultFromRequest(ctx, r)
-	if err != nil {
-		s.logger.Error("Hash fetch failed: " + err.Error())
-		s.respondError(w, http.StatusServiceUnavailable, "Could not get hash")
+
+	metadataType := r.URL.Query().Get("type")
+	if metadataType == "" {
+		s.respondError(w, http.StatusBadRequest, "Missing 'type' parameter")
 		return
 	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 40*time.Second)
+	defer cancel()
+
+	s.logger.Infof("Fetching metadata for type: %s", metadataType)
+
+	result, err := s.metadataService.GetMetadata(ctx, metadataType)
+	if err != nil {
+		s.logger.Errorf("Metadata fetch failed for type '%s': %v", metadataType, err)
+		s.respondError(w, http.StatusServiceUnavailable, "Could not get metadata: "+err.Error())
+		return
+	}
+
+	s.logger.Infof("Successfully fetched metadata for type: %s", metadataType)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(result)
 }
-func (s *Server) handleMetaData(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		s.respondError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
-		return
-	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-
-	res, err := internal.GetMetadataFromRequest(ctx, r)
-	if err != nil {
-		s.logger.Error("Metadata fetch failed: " + err.Error())
-		s.respondError(w, http.StatusServiceUnavailable, "Could not get metadata")
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(res)
-}
 func (s *Server) Start() error {
 	port := s.httpServer.Addr
-	s.logger.Info("Spotify Token Service started on port" + port)
+	s.logger.Info("Spotify Token Service started on port " + port)
 	return s.httpServer.ListenAndServe()
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.logger.Info("Shutting down gracefully...")
 	s.tokenService.Cleanup()
+	s.metadataService.Cleanup()
 	err := s.httpServer.Shutdown(ctx)
 	if err == nil {
 		s.logger.Info("Shutdown complete")
