@@ -8,11 +8,11 @@ import (
 )
 
 const (
-	proactiveRefreshBuffer = 3 * time.Minute // Refresh 3 minutes before expiry
-	checkInterval          = 45 * time.Second // Check less frequently to avoid stacking
+	proactiveRefreshBuffer = 3 * time.Minute
+	checkInterval          = 45 * time.Second
 	maxFailures            = 5
-	tokenTimeout           = 25 * time.Second
-	minTokenLifetime       = 30 * time.Second 
+	tokenTimeout           = 40 * time.Second
+	minTokenLifetime       = 30 * time.Second
 )
 
 type TokenService struct {
@@ -153,7 +153,7 @@ func (ts *TokenService) refreshAnonymousToken() (*SpotifyToken, error) {
 
 	if isRefreshing {
 		ts.logger.Debug("Another refresh in progress, waiting...")
-		time.Sleep(500 * time.Millisecond) 
+		time.Sleep(500 * time.Millisecond)
 		ts.mu.RLock()
 		token := ts.anonymousToken
 		ts.mu.RUnlock()
@@ -194,7 +194,7 @@ func (ts *TokenService) refreshAnonymousToken() (*SpotifyToken, error) {
 		if failures >= maxFailures {
 			go ts.reinitializeBrowser()
 		}
-		
+
 		return nil, err
 	}
 
@@ -203,7 +203,7 @@ func (ts *TokenService) refreshAnonymousToken() (*SpotifyToken, error) {
 		ts.anonymousToken = token
 		ts.consecutiveFailures = 0
 		ts.mu.Unlock()
-		
+
 		expiry := time.UnixMilli(token.AccessTokenExpirationTimestampMs)
 		ts.logger.Infof("Token refreshed successfully (expires in %.1f minutes)", time.Until(expiry).Minutes())
 		return token, nil
@@ -264,7 +264,7 @@ func (ts *TokenService) reinitializeBrowser() {
 		ts.browser.Close()
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1 * time.Second)
 
 	ts.browser = NewBrowser(ts.logger)
 
@@ -303,11 +303,11 @@ func (ts *TokenService) checkAndRefresh() {
 
 	if token != nil {
 		timeUntilExpiry := time.Until(time.UnixMilli(token.AccessTokenExpirationTimestampMs))
-		
+
 		if timeUntilExpiry > 0 && timeUntilExpiry <= proactiveRefreshBuffer {
 			minutes := timeUntilExpiry.Minutes()
 			ts.logger.Infof("Token expiring soon (%.1f minutes), refreshing...", minutes)
-			
+
 			go func() {
 				if _, err := ts.refreshAnonymousToken(); err != nil {
 					ts.logger.Warnf("Proactive refresh failed: %v", err)
@@ -349,12 +349,12 @@ func (ts *TokenService) GetStatus() map[string]interface{} {
 	defer ts.mu.RUnlock()
 
 	status := map[string]interface{}{
-		"initialized":            ts.initialized,
-		"hasAnonymousToken":      ts.anonymousToken != nil,
-		"hasAuthenticatedToken":  ts.authenticatedToken != nil,
-		"isRefreshing":           ts.isRefreshing,
-		"consecutiveFailures":    ts.consecutiveFailures,
-		"anonymousTokenValid":    ts.isTokenValid(ts.anonymousToken),
+		"initialized":             ts.initialized,
+		"hasAnonymousToken":       ts.anonymousToken != nil,
+		"hasAuthenticatedToken":   ts.authenticatedToken != nil,
+		"isRefreshing":            ts.isRefreshing,
+		"consecutiveFailures":     ts.consecutiveFailures,
+		"anonymousTokenValid":     ts.isTokenValid(ts.anonymousToken),
 		"authenticatedTokenValid": ts.isTokenValid(ts.authenticatedToken),
 	}
 

@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	browserTimeout = 35 * time.Second
-	tokenWaitTime  = 20 * time.Second
+	browserTimeout = 50 * time.Second
+	tokenWaitTime  = 35 * time.Second
 )
 
 type Browser struct {
@@ -124,7 +124,6 @@ func (b *Browser) GetToken(cookies []Cookie) (*SpotifyToken, error) {
 		}
 	}
 
-	// Navigate to Spotify
 	tasks = append(tasks, chromedp.Navigate("https://open.spotify.com/"))
 
 	if err := chromedp.Run(timeoutCtx, tasks); err != nil {

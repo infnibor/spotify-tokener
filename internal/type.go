@@ -1,4 +1,5 @@
 package internal
+
 type SpotifyToken struct {
 	AccessToken                      string `json:"accessToken"`
 	AccessTokenExpirationTimestampMs int64  `json:"accessTokenExpirationTimestampMs"`
