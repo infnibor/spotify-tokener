@@ -15,11 +15,13 @@ A simple Spotify Token Service that gives you access tokens for the Spotify Web 
 ## Quick Start
 
 1. **Run with Docker** (Easiest way):
+
    ```bash
    docker run -p 8080:8080 ghcr.io/botxlab/spotokn:latest
    ```
 
 2. **Or use Docker Compose**:
+
    ```bash
    docker compose -f docker-compose.yml up -d
    ```
@@ -39,6 +41,22 @@ That's it! Your service is running on port 8080.
 - `GET /api/token?debug=true` - Get detailed service status and debug information
 - `GET /health` - Simple health check (returns "OK" if service is healthy)
 
+- `GET /api/query` - Get Spotify GraphQL hash and version info for a given URI
+  - Query params: `playlist`, `track`, `album`, `uri`, or `url` (Spotify URI or URL)
+  - Returns JSON with hash, Spotify app version, and payload version
+  - Example:
+    ```bash
+    curl "http://localhost:8080/api/query?playlist=37i9dQZF1DXcBWIGoYBM5M"
+    ```
+  - Response:
+    ```json
+    {
+      "hash": "...",
+      "spotifyAppVersion": "...",
+      "payloadVersion": "..."
+    }
+    ```
+
 ## Hosting and Deployment
 
 Spotokn is lightweight and uses caching to store tokens in memory, keeping memory usage at 15-20 MB. No database needed - everything runs in memory!
@@ -52,16 +70,19 @@ docker run -p 8080:8080 -d ghcr.io/botxlab/spotokn:latest
 ```
 
 #### Or with Docker Compose
+
 ```bash
 docker compose -f docker-compose.yml up -d
 ```
 
 #### To Stop
+
 ```bash
 docker compose -f docker-compose.yml down
 ```
 
 #### View Logs
+
 ```bash
 docker compose -f docker-compose.yml logs -f
 ```
@@ -69,16 +90,20 @@ docker compose -f docker-compose.yml logs -f
 ### Option 2: Build and Run from Source
 
 #### Prerequisites
+
 - Go 1.25 or higher
 - Chrome or Chromium browser installed
 
 #### Local Development
+
 ```bash
 go run ./cmd/spotokn
 ```
+
 Service starts on port 8080.
 
 #### Build Image Locally
+
 ```bash
 docker build -t ghcr.io/botxlab/spotokn:latest -f Dockerfile .
 ```
@@ -100,24 +125,29 @@ docker build -t ghcr.io/botxlab/spotokn:latest -f Dockerfile .
 ## Usage Examples
 
 ### Get Anonymous Token
+
 ```bash
 curl http://localhost:8080/api/token
 ```
 
 ### Get Authenticated Token
+
 First, get the `sp_dc` cookie from [spotify.com](https://spotify.com) (log in, then check browser cookies).
 
 Then use it:
+
 ```bash
 curl --cookie "sp_dc=YOUR_SP_DC_COOKIE_HERE" http://localhost:8080/api/token
 ```
 
 ### Check Service Status
+
 ```bash
 curl "http://localhost:8080/api/token?debug=true"
 ```
 
 ### Health Check
+
 ```bash
 curl http://localhost:8080/health
 ```
@@ -125,12 +155,13 @@ curl http://localhost:8080/health
 **Response Examples:**
 
 Token Response:
+
 ```json
 {
-    "accessToken":"BQD..",
-    "accessTokenExpirationTimestampMs":1765117919348,
-    "clientId":"d8..",
-    "isAnonymous":true
+  "accessToken": "BQD..",
+  "accessTokenExpirationTimestampMs": 1765117919348,
+  "clientId": "d8..",
+  "isAnonymous": true
 }
 ```
 
