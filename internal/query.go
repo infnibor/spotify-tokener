@@ -2,16 +2,18 @@
 package internal
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
+	"io"
+	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"strconv"
-	"log"
 
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/cdproto/network"
@@ -109,39 +111,50 @@ type QueryPayloadResult struct {
 }
 
 func GetSpotifyQueryResultFromRequest(ctx context.Context, r interface{}) (*QueryResult, error) {
-	       if httpReq, ok := r.(*http.Request); ok {
-		       // Najpierw spróbuj pobrać payload bezpośrednio z requesta (jak w handleHash)
-		       results, err := GetSpotifyQueryResultsFromRequest(ctx, httpReq)
-		       if err == nil && len(results) > 0 {
-			       // Zwróć pierwszy wynik (możesz rozwinąć logikę jeśli potrzeba)
-			       return &QueryResult{
-				       Hash:              "",
-				       SpotifyAppVersion: "",
-				       PayloadVersion:    "",
-			       }, nil
+		       if httpReq, ok := r.(*http.Request); ok {
+			       // Pobierz payload i headers 1:1 z requesta HTTP
+			       q := httpReq.URL.Query()
+			       var uri string
+			       if val := q.Get("track"); val != "" {
+				       uri = val
+			       } else if val := q.Get("album"); val != "" {
+				       uri = val
+			       } else if val := q.Get("playlist"); val != "" {
+				       uri = val
+			       } else if val := q.Get("uri"); val != "" {
+				       uri = val
+			       } else if val := q.Get("url"); val != "" {
+				       uri = val
+			       }
+			       if uri == "" {
+				       return nil, errors.New(errEmptyURI)
+			       }
+			       // Zwróć headers i payload w QueryResult (payloadVersion i spotifyAppVersion puste, hash = uri)
+				       headers := map[string]string{}
+				       for k, v := range httpReq.Header {
+					       if len(v) > 0 {
+						       headers[k] = v[0]
+					       }
+				       }
+				       // Odczytaj payload (body) jeśli jest
+				       var payload string
+				       if httpReq.Body != nil {
+					       bodyBytes, err := io.ReadAll(httpReq.Body)
+					       if err == nil {
+						       payload = string(bodyBytes)
+					       }
+					       // Przywróć body do ponownego odczytu (jeśli ktoś jeszcze będzie chciał)
+					       httpReq.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+				       }
+				       return &QueryResult{
+					       Hash:              uri,
+					       SpotifyAppVersion: "",
+					       PayloadVersion:    "",
+					       Headers:           headers,
+					       Payload:           payload,
+				       }, nil
 		       }
-		       // fallback do starego zachowania (chromedp)
-		       q := httpReq.URL.Query()
-		       val := q.Get("playlist")
-		       if val == "" {
-			       val = q.Get("uri")
-		       }
-		       if val == "" {
-			       val = q.Get("track")
-		       }
-		       if val == "" {
-			       // accept full URL via url or q
-			       val = q.Get("url")
-		       }
-		       if val == "" {
-			       val = q.Get("q")
-		       }
-		       if val == "" {
-			       return nil, errors.New(errEmptyURI)
-		       }
-		       return GetSpotifyQueryResult(ctx, val)
-	       }
-	       return nil, errors.New("invalid request type")
+		       return nil, errors.New("invalid request type")
 }
 
 // GetSpotifyQueryResult returns the first found info for the /api/query endpoint (backwards compatible)
