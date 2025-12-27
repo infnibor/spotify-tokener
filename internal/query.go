@@ -137,17 +137,33 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 	}
 	// normalize to path
 	var pageURL string
-	if strings.HasPrefix(spotifyURI, "spotify:track:") {
-		id := strings.TrimPrefix(spotifyURI, "spotify:track:")
-		pageURL = "https://open.spotify.com/track/" + id
-	} else if strings.HasPrefix(spotifyURI, "spotify:playlist:") {
-		id := strings.TrimPrefix(spotifyURI, "spotify:playlist:")
-		pageURL = "https://open.spotify.com/playlist/" + id
-	} else if strings.Contains(spotifyURI, "open.spotify.com/track/") || strings.Contains(spotifyURI, "open.spotify.com/playlist/") {
-		pageURL = spotifyURI
-	} else {
-		return nil, errors.New("unsupported uri format")
-	}
+	       if strings.HasPrefix(spotifyURI, "spotify:track:") {
+		       id := strings.TrimPrefix(spotifyURI, "spotify:track:")
+		       if idx := strings.Index(id, "?"); idx != -1 {
+			       id = id[:idx]
+		       }
+		       pageURL = "https://open.spotify.com/track/" + id
+	       } else if strings.HasPrefix(spotifyURI, "spotify:album:") {
+		       id := strings.TrimPrefix(spotifyURI, "spotify:album:")
+		       if idx := strings.Index(id, "?"); idx != -1 {
+			       id = id[:idx]
+		       }
+		       pageURL = "https://open.spotify.com/album/" + id
+	       } else if strings.HasPrefix(spotifyURI, "spotify:playlist:") {
+		       id := strings.TrimPrefix(spotifyURI, "spotify:playlist:")
+		       if idx := strings.Index(id, "?"); idx != -1 {
+			       id = id[:idx]
+		       }
+		       pageURL = "https://open.spotify.com/playlist/" + id
+	       } else if strings.Contains(spotifyURI, "open.spotify.com/track/") || strings.Contains(spotifyURI, "open.spotify.com/album/") || strings.Contains(spotifyURI, "open.spotify.com/playlist/") {
+		       // Remove query params from URL if present
+		       pageURL = spotifyURI
+		       if idx := strings.Index(pageURL, "?"); idx != -1 {
+			       pageURL = pageURL[:idx]
+		       }
+	       } else {
+		       return nil, errors.New("unsupported uri format")
+	       }
 
 	browserBin := os.Getenv("HASH_BROWSER_BIN")
 	var allocCtx context.Context
