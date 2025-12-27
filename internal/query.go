@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -128,10 +127,11 @@ func processPostData(postData string) {
 		states[hash] = s
 	}
 
-	if opName != "" {
+	// freeze mapping: nie nadpisuj pustym
+	if opName != "" && s.OperationName == "" {
 		s.OperationName = opName
 	}
-	if version != 0 {
+	if version != 0 && s.Version == 0 {
 		s.Version = version
 	}
 }
@@ -167,6 +167,7 @@ func GetSpotifyQueryResults(ctx context.Context, uri string) ([]*QueryPayloadRes
 	cctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
+
 	_ = chromedp.Run(cctx, network.Enable())
 	_ = chromedp.Run(cctx, fetch.Enable().WithPatterns([]*fetch.RequestPattern{
 		{URLPattern: "*pathfinder/v2/query*", RequestStage: fetch.RequestStageRequest},
@@ -189,14 +190,12 @@ func GetSpotifyQueryResults(ctx context.Context, uri string) ([]*QueryPayloadRes
 	if err := chromedp.Run(
 		cctx,
 		chromedp.Navigate(pageURL),
-		chromedp.Sleep(4*time.Second),
+		chromedp.Sleep(5*time.Second),
 		chromedp.Reload(),
 		chromedp.Sleep(4*time.Second),
 	); err != nil {
 		return nil, err
 	}
-
-	time.Sleep(2 * time.Second)
 
 	stateMu.Lock()
 	defer stateMu.Unlock()
