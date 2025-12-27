@@ -15,8 +15,8 @@ import (
 
 const (
 	defaultPort         = 8080
-	readTimeout         = 10 * time.Second
-	writeTimeout        = 10 * time.Second
+	readTimeout         = 15 * time.Second
+	writeTimeout        = 60 * time.Second // Increased from 10s to handle long metadata fetches
 	idleTimeout         = 120 * time.Second
 	errMethodNotAllowed = "Method not allowed"
 )
@@ -83,9 +83,7 @@ func (s *Server) handleMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger.Infof("Successfully fetched metadata for type: %s", metadataType)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(result)
+	s.respondJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) Start() error {
@@ -153,7 +151,9 @@ func (s *Server) handleNotFound(w http.ResponseWriter, r *http.Request) {
 func (s *Server) respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		s.logger.Errorf("Failed to encode JSON response: %v", err)
+	}
 }
 
 func (s *Server) respondError(w http.ResponseWriter, status int, message string) {
