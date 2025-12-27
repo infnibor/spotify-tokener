@@ -15,11 +15,6 @@ import (
 	"github.com/chromedp/cdproto/network"
 )
 
-type QueryResult struct {
-       Hash              string `json:"hash"`
-       SpotifyAppVersion string `json:"spotifyAppVersion"`
-       PayloadVersion    string `json:"payloadVersion"`
-}
 
 // ParseSpotifyTypeAndID extracts type (track/playlist/album) and ID from URI or URL
 func ParseSpotifyTypeAndID(input string) (string, string) {
@@ -49,32 +44,21 @@ func ParseSpotifyTypeAndID(input string) (string, string) {
 // GetSpotifyQueryResultByType handles hash fetching for track, playlist, or album with operationName
 func GetSpotifyQueryResultByType(ctx context.Context, typeName, id, operationName string) (*QueryResult, error) {
        // Compose URI for navigation
-       var uri, url string
-       switch typeName {
-       case "track":
-	       uri = "spotify:track:" + id
-	       url = "https://open.spotify.com/track/" + id
-       case "playlist":
-	       uri = "spotify:playlist:" + id
-	       url = "https://open.spotify.com/playlist/" + id
-       case "album":
-	       uri = "spotify:album:" + id
-	       url = "https://open.spotify.com/album/" + id
-       default:
-	       return nil, errors.New("unsupported type")
-       }
+	       var uri string
+	       switch typeName {
+	       case "track":
+		       uri = "spotify:track:" + id
+	       case "playlist":
+		       uri = "spotify:playlist:" + id
+	       case "album":
+		       uri = "spotify:album:" + id
+	       default:
+		       return nil, errors.New("unsupported type")
+	       }
 
        // Simulate hash manager freshness check (always fetch new for demo)
        // For track, playlist, album, use different POST payloads
-       var postPayload string
-       switch typeName {
-       case "track":
-	       postPayload = `{"variables":{"trackUri":"` + uri + `"},"operationName":"getTrack","extensions":{"persistedQuery":{"version":1,"sha256Hash":""}}}`
-       case "playlist":
-	       postPayload = `{"variables":{"uri":"` + uri + `"},"operationName":"fetchPlaylist","extensions":{"persistedQuery":{"version":1,"sha256Hash":""}}}`
-       case "album":
-	       postPayload = `{"variables":{"uri":"` + uri + `"},"operationName":"getAlbum","extensions":{"persistedQuery":{"version":1,"sha256Hash":""}}}`
-       }
+	       // (postPayload is not used)
 
        // Use browser automation to fetch hash (reuse GetSpotifyQueryResult for now)
        // In real code, would use operationName and payload, but for now call GetSpotifyQueryResult
