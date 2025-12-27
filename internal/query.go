@@ -1,51 +1,52 @@
 
 
 package internal
+
+import (
+       "context"
+       "encoding/json"
+       "errors"
+       "os"
+       "net/http"
+       "strings"
+       "sync"
+       "time"
+       "strconv"
+       "log"
+
+       "github.com/chromedp/chromedp"
+       "github.com/chromedp/cdproto/network"
+       "github.com/chromedp/cdproto/fetch"
+)
+
 var (
-	globalHashManager = NewHashManager()
+       globalHashManager = NewHashManager()
 )
 
 // Scraper function for HashManager: scrapes the hash for the given type by visiting a sample URI
 func scrapeHash(ctx context.Context, ht HashType) (string, error) {
-	var sampleURI string
-	switch ht {
-	case HashTrack:
-		sampleURI = "spotify:track:11dFghVXANMlKmJXsNCbNl" // Example track URI
-	case HashAlbum:
-		sampleURI = "spotify:album:1ATL5GLyefJaxhQzSPVrLX" // Example album URI
-	case HashPlaylist:
-		sampleURI = "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M" // Example playlist URI
-	default:
-		return "", errors.New("unknown hash type")
-	}
-	results, err := GetSpotifyQueryResults(ctx, sampleURI)
-	if err != nil || len(results) == 0 {
-		return "", errors.New("could not scrape hash for " + ht.String())
-	}
-	for _, r := range results {
-		if r.PersistedQuery != nil && r.PersistedQuery.Sha256Hash != "" {
-			return r.PersistedQuery.Sha256Hash, nil
-		}
-	}
-	return "", errors.New("no hash found in scrape for " + ht.String())
+       var sampleURI string
+       switch ht {
+       case HashTrack:
+	       sampleURI = "spotify:track:11dFghVXANMlKmJXsNCbNl" // Example track URI
+       case HashAlbum:
+	       sampleURI = "spotify:album:1ATL5GLyefJaxhQzSPVrLX" // Example album URI
+       case HashPlaylist:
+	       sampleURI = "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M" // Example playlist URI
+       default:
+	       return "", errors.New("unknown hash type")
+       }
+       results, err := GetSpotifyQueryResults(ctx, sampleURI)
+       if err != nil || len(results) == 0 {
+	       return "", errors.New("could not scrape hash for " + ht.String())
+       }
+       for _, r := range results {
+	       if r.PersistedQuery != nil && r.PersistedQuery.Sha256Hash != "" {
+		       return r.PersistedQuery.Sha256Hash, nil
+	       }
+       }
+       return "", errors.New("no hash found in scrape for " + ht.String())
 }
-
-import (
-	"context"
-	"encoding/json"
-	"errors"
-	"os"
-	"net/http"
-	"strings"
-	"sync"
-	"time"
-	"strconv"
-	"log"
-
-	"github.com/chromedp/chromedp"
-	"github.com/chromedp/cdproto/network"
-	"github.com/chromedp/cdproto/fetch"
-)
 
 type QueryResult struct {
 	Hash              string `json:"hash"`
