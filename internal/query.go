@@ -223,17 +223,17 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 					var pd string
 					var err error
 					// retry several times — CDP can be slow to expose postData
-					for i := 0; i < 6; i++ {
-						ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2500*time.Millisecond)
-						pd, err = network.GetRequestPostData(reqID).Do(ctxWithTimeout)
-						cancelGet()
-						if err == nil && pd != "" {
-							processPostData(reqID.String(), pd, &mu, &results, seen, headers)
-							return
-						}
-						// backoff between attempts
-						time.Sleep(time.Duration(150+150*i) * time.Millisecond)
-					}
+					       for i := 0; i < 3; i++ {
+						       ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 600*time.Millisecond)
+						       pd, err = network.GetRequestPostData(reqID).Do(ctxWithTimeout)
+						       cancelGet()
+						       if err == nil && pd != "" {
+							       processPostData(reqID.String(), pd, &mu, &results, seen, headers)
+							       return
+						       }
+						       // backoff between attempts
+						       time.Sleep(time.Duration(80+80*i) * time.Millisecond)
+					       }
 					if err != nil {
 						log.Printf("[query] GetRequestPostData error id=%s url=%s err=%v headers=%v", reqID, url, err, headers)
 					} else {
@@ -245,18 +245,18 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 	})
 
 	// navigate and trigger reload to ensure requests fire
-	actions := []chromedp.Action{
-		chromedp.Navigate(pageURL),
-		chromedp.Sleep(4000 * time.Millisecond),
-		chromedp.Reload(),
-		chromedp.Sleep(4500 * time.Millisecond),
-	}
-	if err := chromedp.Run(cctx, actions...); err != nil {
-		return nil, err
-	}
+	       actions := []chromedp.Action{
+		       chromedp.Navigate(pageURL),
+		       chromedp.Sleep(800 * time.Millisecond),
+		       chromedp.Reload(),
+		       chromedp.Sleep(900 * time.Millisecond),
+	       }
+	       if err := chromedp.Run(cctx, actions...); err != nil {
+		       return nil, err
+	       }
 
-	// wait a little more to allow background handlers to record requests
-	time.Sleep(3500 * time.Millisecond)
+	       // wait a little more to allow background handlers to record requests
+	       time.Sleep(600 * time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -450,16 +450,16 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 				go func(reqID network.RequestID, headers network.Headers, url string) {
 					var pd string
 					var err error
-					for i := 0; i < 6; i++ {
-						ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 2500*time.Millisecond)
-						pd, err = network.GetRequestPostData(reqID).Do(ctxWithTimeout)
-						cancelGet()
-						if err == nil && pd != "" {
-							processPostData(reqID.String(), pd, &mu, &results, seen, headers)
-							return
-						}
-						time.Sleep(time.Duration(150+150*i) * time.Millisecond)
-					}
+					       for i := 0; i < 3; i++ {
+						       ctxWithTimeout, cancelGet := context.WithTimeout(cctx, 600*time.Millisecond)
+						       pd, err = network.GetRequestPostData(reqID).Do(ctxWithTimeout)
+						       cancelGet()
+						       if err == nil && pd != "" {
+							       processPostData(reqID.String(), pd, &mu, &results, seen, headers)
+							       return
+						       }
+						       time.Sleep(time.Duration(80+80*i) * time.Millisecond)
+					       }
 					if err != nil {
 						log.Printf("[query] GetRequestPostData error id=%s url=%s err=%v headers=%v", reqID, url, err, headers)
 					} else {
@@ -470,17 +470,17 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 		}
 	})
 
-	actions := []chromedp.Action{
-		chromedp.Navigate(pageURL),
-		chromedp.Sleep(1500 * time.Millisecond),
-		chromedp.Reload(),
-		chromedp.Sleep(3000 * time.Millisecond),
-	}
-	if err := chromedp.Run(cctx, actions...); err != nil {
-		return nil, err
-	}
+	       actions := []chromedp.Action{
+		       chromedp.Navigate(pageURL),
+		       chromedp.Sleep(400 * time.Millisecond),
+		       chromedp.Reload(),
+		       chromedp.Sleep(600 * time.Millisecond),
+	       }
+	       if err := chromedp.Run(cctx, actions...); err != nil {
+		       return nil, err
+	       }
 
-	time.Sleep(2500 * time.Millisecond)
+	       time.Sleep(400 * time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
