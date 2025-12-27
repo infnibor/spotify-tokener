@@ -1,3 +1,26 @@
+package internal
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+	"strconv"
+
+	"github.com/chromedp/chromedp"
+	"github.com/chromedp/cdproto/network"
+)
+
+type QueryResult struct {
+       Hash              string `json:"hash"`
+       SpotifyAppVersion string `json:"spotifyAppVersion"`
+       PayloadVersion    string `json:"payloadVersion"`
+}
+
 // ParseSpotifyTypeAndID extracts type (track/playlist/album) and ID from URI or URL
 func ParseSpotifyTypeAndID(input string) (string, string) {
 	input = strings.TrimSpace(input)
@@ -69,28 +92,6 @@ func GetSpotifyQueryResultByType(ctx context.Context, typeName, id, operationNam
        return nil, errors.New("not implemented")
 }
 
-package internal
-
-import (
-	"context"
-	"encoding/json"
-	"errors"
-	"os"
-	"net/http"
-	"strings"
-	"sync"
-	"time"
-	"strconv"
-
-	"github.com/chromedp/chromedp"
-	"github.com/chromedp/cdproto/network"
-)
-
-type QueryResult struct {
-       Hash              string `json:"hash"`
-       SpotifyAppVersion string `json:"spotifyAppVersion"`
-       PayloadVersion    string `json:"payloadVersion"`
-}
 
 func GetSpotifyQueryResultFromRequest(ctx context.Context, r interface{}) (*QueryResult, error) {
 	if httpReq, ok := r.(*http.Request); ok {
