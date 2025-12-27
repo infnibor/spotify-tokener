@@ -1,3 +1,4 @@
+package internal
 type QueryResult struct {
 	Hash              string            `json:"hash"`
 	SpotifyAppVersion string            `json:"spotifyAppVersion"`
@@ -5,7 +6,6 @@ type QueryResult struct {
 	Headers           map[string]string `json:"headers,omitempty"`
 	Payload           string            `json:"payload,omitempty"`
 }
-package internal
 type SpotifyToken struct {
 	AccessToken                      string `json:"accessToken"`
 	AccessTokenExpirationTimestampMs int64  `json:"accessTokenExpirationTimestampMs"`
