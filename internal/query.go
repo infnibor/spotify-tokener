@@ -1,3 +1,6 @@
+
+package internal
+
 const (
 	errEmptyURI           = "empty uri"
 	prefixTrack           = "spotify:track:"
@@ -5,9 +8,6 @@ const (
 	prefixPlaylist        = "spotify:playlist:"
 	pathfinderQuery       = "pathfinder/v2/query"
 )
-
-
-package internal
 
 import (
        "context"
