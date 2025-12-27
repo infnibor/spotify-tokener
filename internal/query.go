@@ -48,26 +48,7 @@ func GetSpotifyQueryResultsFromRequest(ctx context.Context, r *http.Request) ([]
 	       RequestID:         "",
 	       RawPayload:        map[string]interface{}{ "uri": uri },
        }}, nil
-}
 
-package internal
-
-import (
-	"context"
-	"encoding/json"
-	"errors"
-	"os"
-	"net/http"
-	"strings"
-	"sync"
-	"time"
-	"strconv"
-	"log"
-
-	"github.com/chromedp/chromedp"
-	"github.com/chromedp/cdproto/network"
-	"github.com/chromedp/cdproto/fetch"
-)
 
 const (
 	errEmptyURI           = "empty uri"
