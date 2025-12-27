@@ -220,11 +220,10 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.ToUpper(e.Request.Method) == "POST" {
-				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
-				// Only attempt fetching bodies for pathfinder queries to reduce noise/errors
 				       if e.Request.URL != "https://api-partner.spotify.com/pathfinder/v2/query" {
 					       return
 				       }
+				       log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
 				// fetch post data asynchronously using the request ID with retry/backoff
 				go func(reqID network.RequestID, headers network.Headers, url string) {
 					var pd string
@@ -450,10 +449,10 @@ func GetSpotifyQueryResultsWithBrowser(ctx context.Context, b *Browser, spotifyU
 		}
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.ToUpper(e.Request.Method) == "POST" {
-				log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
 				       if e.Request.URL != "https://api-partner.spotify.com/pathfinder/v2/query" {
 					       return
 				       }
+				       log.Printf("[query] POST observed url=%s id=%s", e.Request.URL, e.RequestID)
 				go func(reqID network.RequestID, headers network.Headers, url string) {
 					var pd string
 					var err error
