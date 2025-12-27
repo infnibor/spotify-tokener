@@ -24,58 +24,100 @@ type MetadataResult struct {
 type metadataConfig struct {
 	operationName string
 	url           string
-	action        string
-	selector      string
+	waitTime      time.Duration
 }
 
 var metadataConfigs = map[string]metadataConfig{
 	"playlist": {
 		operationName: "fetchPlaylist",
 		url:           "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M",
-		action:        "click",
-		selector:      "button[data-testid='play-button']",
+		waitTime:      2 * time.Second,
 	},
 	"playlistMetadata": {
 		operationName: "fetchPlaylistMetadata",
 		url:           "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M",
-		action:        "navigate",
-		selector:      "",
+		waitTime:      1 * time.Second,
 	},
 	"track": {
 		operationName: "getTrack",
 		url:           "https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp",
-		action:        "click",
-		selector:      "button[data-testid='play-button']",
+		waitTime:      2 * time.Second,
 	},
 	"album": {
 		operationName: "getAlbum",
 		url:           "https://open.spotify.com/album/1DFixLWuPkv3KT3TnV35m3",
-		action:        "click",
-		selector:      "button[data-testid='play-button']",
+		waitTime:      2 * time.Second,
 	},
 	"trackRecommender": {
 		operationName: "internalLinkRecommenderTrack",
 		url:           "https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp",
-		action:        "scroll",
-		selector:      "div[data-testid='track-page']",
+		waitTime:      3 * time.Second, // Slightly longer for recommendations to load
+	},
+	"similarAlbums": {
+		operationName: "similarAlbumsBasedOnThisTrack",
+		url:           "https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp",
+		waitTime:      3 * time.Second,
+	},
+	"artistOverview": {
+		operationName: "queryArtistOverview",
+		url:           "https://open.spotify.com/artist/4mxWe1mtYIYfP040G38yvS", // Example artist
+		waitTime:      2 * time.Second,
 	},
 }
 
+type capturedRequest struct {
+	requestID         network.RequestID
+	spotifyAppVersion string
+}
+
 type MetadataService struct {
-	logger    *Logger
-	mu        sync.RWMutex
-	cache     map[string]*MetadataResult
-	cacheTTL  time.Duration
-	cacheTime map[string]time.Time
+	logger      *Logger
+	mu          sync.RWMutex
+	cache       map[string]*MetadataResult
+	cacheTTL    time.Duration
+	cacheTime   map[string]time.Time
+	allocCtx    context.Context
+	allocCancel context.CancelFunc
 }
 
 func NewMetadataService(logger *Logger) *MetadataService {
-	return &MetadataService{
+	ms := &MetadataService{
 		logger:    logger,
 		cache:     make(map[string]*MetadataResult),
 		cacheTime: make(map[string]time.Time),
 		cacheTTL:  30 * time.Minute,
 	}
+
+	ms.initializeBrowser()
+
+	return ms
+}
+
+func (ms *MetadataService) initializeBrowser() {
+	browserBin := os.Getenv("METADATA_BROWSER_BIN")
+	if browserBin == "" {
+		browserBin = os.Getenv("HASH_BROWSER_BIN")
+	}
+
+	opts := append([]chromedp.ExecAllocatorOption{},
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("disable-setuid-sandbox", true),
+		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-extensions", true),
+		chromedp.Flag("disable-background-timer-throttling", true),
+		chromedp.Flag("disable-backgrounding-occluded-windows", true),
+		chromedp.Flag("disable-renderer-backgrounding", true),
+		chromedp.Flag("headless", true),
+		chromedp.WindowSize(1920, 1080),
+	)
+
+	if browserBin != "" {
+		ms.logger.Infof("Using custom browser for metadata: %s", browserBin)
+		opts = append(opts, chromedp.ExecPath(browserBin))
+	}
+
+	ms.allocCtx, ms.allocCancel = chromedp.NewExecAllocator(context.Background(), opts...)
 }
 
 func (ms *MetadataService) GetMetadata(ctx context.Context, metadataType string) (*MetadataResult, error) {
@@ -90,7 +132,11 @@ func (ms *MetadataService) GetMetadata(ctx context.Context, metadataType string)
 
 	config, exists := metadataConfigs[metadataType]
 	if !exists {
-		return nil, fmt.Errorf("unsupported metadata type: %s (supported: playlist, playlistMetadata, track, album, trackRecommender)", metadataType)
+		supported := make([]string, 0, len(metadataConfigs))
+		for k := range metadataConfigs {
+			supported = append(supported, k)
+		}
+		return nil, fmt.Errorf("unsupported metadata type: %s (supported: %v)", metadataType, supported)
 	}
 
 	ms.logger.Infof("Fetching fresh metadata for type: %s", metadataType)
@@ -108,55 +154,36 @@ func (ms *MetadataService) GetMetadata(ctx context.Context, metadataType string)
 }
 
 func (ms *MetadataService) fetchMetadata(ctx context.Context, config metadataConfig) (*MetadataResult, error) {
-	browserBin := os.Getenv("METADATA_BROWSER_BIN")
-	if browserBin == "" {
-		browserBin = os.Getenv("HASH_BROWSER_BIN")
-	}
-
-	var allocCtx context.Context
-	var allocCancel context.CancelFunc
-
-	if browserBin != "" {
-		ms.logger.Infof("Using custom browser: %s", browserBin)
-		opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(browserBin))
-		allocCtx, allocCancel = chromedp.NewExecAllocator(ctx, opts...)
-	} else {
-		allocCtx, allocCancel = chromedp.NewExecAllocator(ctx, chromedp.DefaultExecAllocatorOptions[:]...)
-	}
-	defer allocCancel()
-
-	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
+	browserCtx, browserCancel := chromedp.NewContext(ms.allocCtx)
 	defer browserCancel()
 
-	var result MetadataResult
+	timeoutCtx, timeoutCancel := context.WithTimeout(browserCtx, 30*time.Second)
+	defer timeoutCancel()
+
 	var mu sync.Mutex
-	var targetRequestID network.RequestID
-	found := false
+	capturedRequests := make([]capturedRequest, 0)
 
-	chromedp.ListenTarget(browserCtx, func(ev interface{}) {
-		if found {
-			return
-		}
-
+	chromedp.ListenTarget(timeoutCtx, func(ev interface{}) {
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.Contains(e.Request.URL, "/pathfinder/v2/query") && e.Request.Method == "POST" {
 				mu.Lock()
 				defer mu.Unlock()
 
-				if found {
-					return
+				req := capturedRequest{
+					requestID: e.RequestID,
 				}
 
+				// Extract Spotify app version from headers
 				for k, v := range e.Request.Headers {
 					if strings.ToLower(k) == "spotify-app-version" {
 						if vs, ok := v.(string); ok {
-							result.SpotifyAppVersion = vs
+							req.spotifyAppVersion = vs
 						}
 					}
 				}
 
-				targetRequestID = e.RequestID
-				ms.logger.Debugf("Captured request ID for operation: %s", config.operationName)
+				capturedRequests = append(capturedRequests, req)
+				ms.logger.Debugf("Captured pathfinder request #%d", len(capturedRequests))
 			}
 		}
 	})
@@ -165,101 +192,108 @@ func (ms *MetadataService) fetchMetadata(ctx context.Context, config metadataCon
 
 	tasks := []chromedp.Action{
 		chromedp.Navigate(config.url),
-		chromedp.Sleep(1 * time.Second),
+		chromedp.Sleep(config.waitTime),
 	}
 
-	switch config.action {
-	case "click":
-		if config.selector != "" {
-			tasks = append(tasks,
-				chromedp.WaitVisible(config.selector, chromedp.ByQuery),
-				chromedp.Sleep(500*time.Millisecond),
-				chromedp.Click(config.selector, chromedp.ByQuery),
-				chromedp.Sleep(1*time.Second),
-			)
-		}
-	case "scroll":
-		if config.selector != "" {
-			tasks = append(tasks,
-				chromedp.WaitVisible(config.selector, chromedp.ByQuery),
-				chromedp.Sleep(500*time.Millisecond),
-				chromedp.ScrollIntoView(config.selector, chromedp.ByQuery),
-				chromedp.Sleep(2*time.Second),
-			)
-		}
-	case "navigate":
-		tasks = append(tasks, chromedp.Sleep(2*time.Second))
-	}
-
-	if err := chromedp.Run(browserCtx, tasks...); err != nil {
+	if err := chromedp.Run(timeoutCtx, tasks...); err != nil {
 		ms.logger.Errorf("Browser navigation failed for %s: %v", config.operationName, err)
 		return nil, fmt.Errorf("navigation failed: %w", err)
 	}
 
+	// Give a bit more time to capture all requests
+	time.Sleep(500 * time.Millisecond)
+
 	mu.Lock()
-	reqID := targetRequestID
+	requests := make([]capturedRequest, len(capturedRequests))
+	copy(requests, capturedRequests)
 	mu.Unlock()
 
-	if reqID == "" {
-		ms.logger.Errorf("No request captured for operation: %s", config.operationName)
-		return nil, errors.New("failed to capture metadata request")
+	if len(requests) == 0 {
+		ms.logger.Errorf("No pathfinder requests captured for operation: %s", config.operationName)
+		return nil, errors.New("failed to capture any metadata requests")
 	}
 
-	var postData string
-	err := chromedp.Run(browserCtx, chromedp.ActionFunc(func(ctx context.Context) error {
-		pd, err := network.GetRequestPostData(reqID).Do(ctx)
+	ms.logger.Infof("Captured %d pathfinder requests, analyzing...", len(requests))
+
+	// Try each captured request to find the matching operation
+	for i, req := range requests {
+		ms.logger.Debugf("Analyzing request %d/%d", i+1, len(requests))
+
+		var postData string
+		err := chromedp.Run(timeoutCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+			pd, err := network.GetRequestPostData(req.requestID).Do(ctx)
+			if err != nil {
+				return err
+			}
+			postData = pd
+			return nil
+		}))
+
 		if err != nil {
-			return err
+			ms.logger.Debugf("Failed to get POST data for request %d: %v", i+1, err)
+			continue
 		}
-		postData = pd
-		return nil
-	}))
 
-	if err != nil {
-		ms.logger.Errorf("Failed to get POST data for %s: %v", config.operationName, err)
-		return nil, fmt.Errorf("failed to extract POST data: %w", err)
+		if postData == "" || !strings.Contains(postData, "sha256Hash") {
+			ms.logger.Debugf("Request %d has invalid POST data", i+1)
+			continue
+		}
+
+		if !strings.Contains(postData, config.operationName) {
+			ms.logger.Debugf("Request %d is not for operation %s", i+1, config.operationName)
+			continue
+		}
+
+		ms.logger.Infof("Found matching request for operation: %s", config.operationName)
+
+		var payload map[string]interface{}
+		if err := json.Unmarshal([]byte(postData), &payload); err != nil {
+			ms.logger.Errorf("Failed to parse POST data for %s: %v", config.operationName, err)
+			continue
+		}
+
+		ext, ok := payload["extensions"].(map[string]interface{})
+		if !ok {
+			ms.logger.Debug("Missing extensions in payload")
+			continue
+		}
+
+		pq, ok := ext["persistedQuery"].(map[string]interface{})
+		if !ok {
+			ms.logger.Debug("Missing persistedQuery in payload")
+			continue
+		}
+
+		hash, ok := pq["sha256Hash"].(string)
+		if !ok || hash == "" {
+			ms.logger.Debug("Missing or invalid sha256Hash")
+			continue
+		}
+
+		result := &MetadataResult{
+			OperationName:     config.operationName,
+			Hash:              hash,
+			SpotifyAppVersion: req.spotifyAppVersion,
+		}
+
+		if version, ok := pq["version"].(float64); ok {
+			result.PayloadVersion = fmt.Sprintf("%d", int(version))
+		}
+
+		ms.logger.Infof("Successfully extracted metadata for %s: hash=%s", config.operationName, hash[:12]+"...")
+		return result, nil
 	}
 
-	if postData == "" || !strings.Contains(postData, "sha256Hash") {
-		ms.logger.Errorf("Invalid POST data for %s", config.operationName)
-		return nil, errors.New("invalid or missing POST data")
-	}
-
-	var payload map[string]interface{}
-	if err := json.Unmarshal([]byte(postData), &payload); err != nil {
-		ms.logger.Errorf("Failed to parse POST data for %s: %v", config.operationName, err)
-		return nil, fmt.Errorf("failed to parse POST data: %w", err)
-	}
-
-	ext, ok := payload["extensions"].(map[string]interface{})
-	if !ok {
-		return nil, errors.New("missing extensions in payload")
-	}
-
-	pq, ok := ext["persistedQuery"].(map[string]interface{})
-	if !ok {
-		return nil, errors.New("missing persistedQuery in payload")
-	}
-
-	hash, ok := pq["sha256Hash"].(string)
-	if !ok || hash == "" {
-		return nil, errors.New("missing or invalid sha256Hash")
-	}
-
-	result.OperationName = config.operationName
-	result.Hash = hash
-
-	if version, ok := pq["version"].(float64); ok {
-		result.PayloadVersion = fmt.Sprintf("%d", int(version))
-	}
-
-	ms.logger.Infof("Successfully extracted metadata for %s: hash=%s", config.operationName, hash[:12]+"...")
-
-	return &result, nil
+	return nil, fmt.Errorf("operation %s not found in any captured request", config.operationName)
 }
 
 func (ms *MetadataService) Cleanup() {
 	ms.logger.Info("Cleaning up metadata service...")
+
+	if ms.allocCancel != nil {
+		ms.allocCancel()
+	}
+
 	ms.mu.Lock()
 	ms.cache = make(map[string]*MetadataResult)
 	ms.cacheTime = make(map[string]time.Time)
