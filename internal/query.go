@@ -111,11 +111,10 @@ func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResul
 				Hash:              r.PersistedQuery.Sha256Hash,
 				SpotifyAppVersion: r.SpotifyAppVersion,
 				PayloadVersion:    strconv.Itoa(r.PersistedQuery.Version),
-				OperationName:     r.OperationName,
 			}, nil
 		}
 	}
-	// fallback: jeśli nie znaleziono żadnego z hashem, zwróć pierwszy wynik (może być pusty hash)
+	// fallback to first result
 	first := results[0]
 	var hv string
 	var pv string
@@ -123,12 +122,12 @@ func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResul
 		hv = first.PersistedQuery.Sha256Hash
 		pv = strconv.Itoa(first.PersistedQuery.Version)
 	}
-	return &QueryResult{
-		Hash:              hv,
-		SpotifyAppVersion: first.SpotifyAppVersion,
-		PayloadVersion:    pv,
-		OperationName:     first.OperationName,
-	}, nil
+	       return &QueryResult{
+		       Hash:              hv,
+		       SpotifyAppVersion: first.SpotifyAppVersion,
+		       PayloadVersion:    pv,
+		       OperationName:     first.OperationName,
+	       }, nil
 }
 
 // GetSpotifyQueryResults visits the provided Spotify URI (track or playlist), reloads, and
