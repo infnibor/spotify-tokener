@@ -17,7 +17,7 @@ import (
 )
 
 /* =========================
-   STRUCTS
+   PUBLIC STRUCTS
    ========================= */
 
 type QueryResult struct {
@@ -28,130 +28,156 @@ type QueryResult struct {
 }
 
 type PersistedQueryInfo struct {
-	Version    int
-	Sha256Hash string
+	Version    int    `json:"version"`
+	Sha256Hash string `json:"sha256Hash"`
 }
 
 type QueryPayloadResult struct {
-	OperationName  string
-	PersistedQuery *PersistedQueryInfo
+	OperationName     string
+	PersistedQuery    *PersistedQueryInfo
+	SpotifyAppVersion string
+	RequestID         string
+	RawPayload        map[string]interface{}
 }
 
 /* =========================
-   GLOBAL CORRELATION
+   REQUEST CORRELATION STATE
    ========================= */
 
-type queryState struct {
-	Hash          string
+type requestState struct {
 	OperationName string
+	Hash          string
 	Version       int
+	RawPayload    map[string]interface{}
 }
 
-var (
-	stateMu sync.Mutex
-	states  = map[string]*queryState{} // key = sha256Hash
-)
+var requestStates sync.Map // map[string]*requestState
 
 /* =========================
-   DEEP OPERATION SCAN
+   OPERATION NAME DEEP SCAN
    ========================= */
 
-func findOperationName(v interface{}) string {
+func findOperationName(v interface{}, state *requestState) {
 	switch val := v.(type) {
 	case map[string]interface{}:
 		for k, v2 := range val {
 			if k == "operationName" {
 				if s, ok := v2.(string); ok && s != "" {
-					return s
+					state.OperationName = s
+					return
 				}
 			}
-			if r := findOperationName(v2); r != "" {
-				return r
+			findOperationName(v2, state)
+			if state.OperationName != "" {
+				return
 			}
 		}
 	case []interface{}:
 		for _, v2 := range val {
-			if r := findOperationName(v2); r != "" {
-				return r
+			findOperationName(v2, state)
+			if state.OperationName != "" {
+				return
 			}
 		}
 	}
-	return ""
 }
 
 /* =========================
-   POST DATA PROCESSOR
+   PAYLOAD PROCESSOR
    ========================= */
 
-func processPostData(postData string) {
+func processPostData(
+	requestID string,
+	postData string,
+	mu *sync.Mutex,
+	results *[]*QueryPayloadResult,
+	seen map[string]bool,
+	headers network.Headers,
+) {
 	var raw map[string]interface{}
-	if json.Unmarshal([]byte(postData), &raw) != nil {
+	if err := json.Unmarshal([]byte(postData), &raw); err != nil {
 		return
 	}
 
-	var (
-		hash    string
-		version int
-		opName  string
-	)
+	stateAny, _ := requestStates.LoadOrStore(requestID, &requestState{})
+	state := stateAny.(*requestState)
 
-	// operationName (ANYWHERE)
-	if v, ok := raw["operationName"].(string); ok {
-		opName = v
-	}
-	if opName == "" {
-		opName = findOperationName(raw)
+	/* ---- operationName extraction ---- */
+
+	if op, ok := raw["operationName"].(string); ok && op != "" {
+		state.OperationName = op
 	}
 
-	// persistedQuery
-	if ext, ok := raw["extensions"].(map[string]interface{}); ok {
-		if pq, ok := ext["persistedQuery"].(map[string]interface{}); ok {
-			if h, ok := pq["sha256Hash"].(string); ok {
-				hash = h
-			}
-			if v, ok := pq["version"].(float64); ok {
-				version = int(v)
+	if state.OperationName == "" {
+		if ext, ok := raw["extensions"].(map[string]interface{}); ok {
+			if op, ok := ext["operationName"].(string); ok && op != "" {
+				state.OperationName = op
 			}
 		}
 	}
 
-	if hash == "" {
+	if state.OperationName == "" {
+		findOperationName(raw, state)
+	}
+
+	/* ---- hash extraction ---- */
+
+	if ext, ok := raw["extensions"].(map[string]interface{}); ok {
+		if pq, ok := ext["persistedQuery"].(map[string]interface{}); ok {
+			if h, ok := pq["sha256Hash"].(string); ok {
+				state.Hash = h
+			}
+			if v, ok := pq["version"].(float64); ok {
+				state.Version = int(v)
+			}
+		}
+	}
+
+	state.RawPayload = raw
+
+	// ❗ NIE EMITUJEMY, jeśli nie mamy OBU
+	if state.Hash == "" || state.OperationName == "" {
 		return
 	}
 
-	stateMu.Lock()
-	defer stateMu.Unlock()
+	mu.Lock()
+	defer mu.Unlock()
 
-	s, ok := states[hash]
-	if !ok {
-		s = &queryState{Hash: hash}
-		states[hash] = s
+	if seen[requestID] {
+		return
 	}
+	seen[requestID] = true
 
-	if opName != "" {
-		s.OperationName = opName
-	}
-	if version != 0 {
-		s.Version = version
-	}
+	*results = append(*results, &QueryPayloadResult{
+		OperationName: state.OperationName,
+		PersistedQuery: &PersistedQueryInfo{
+			Version:    state.Version,
+			Sha256Hash: state.Hash,
+		},
+		RequestID:  requestID,
+		RawPayload: state.RawPayload,
+	})
 }
 
 /* =========================
    SCRAPER
    ========================= */
 
-func GetSpotifyQueryResults(ctx context.Context, uri string) ([]*QueryPayloadResult, error) {
-	if uri == "" {
+func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPayloadResult, error) {
+	if spotifyURI == "" {
 		return nil, errors.New("empty uri")
 	}
 
 	var pageURL string
 	switch {
-	case strings.Contains(uri, "spotify:"):
-		parts := strings.Split(uri, ":")
-		pageURL = "https://open.spotify.com/" + parts[1] + "/" + parts[2]
-	case strings.Contains(uri, "open.spotify.com"):
-		pageURL = strings.Split(uri, "?")[0]
+	case strings.HasPrefix(spotifyURI, "spotify:track:"):
+		pageURL = "https://open.spotify.com/track/" + strings.TrimPrefix(spotifyURI, "spotify:track:")
+	case strings.HasPrefix(spotifyURI, "spotify:album:"):
+		pageURL = "https://open.spotify.com/album/" + strings.TrimPrefix(spotifyURI, "spotify:album:")
+	case strings.HasPrefix(spotifyURI, "spotify:playlist:"):
+		pageURL = "https://open.spotify.com/playlist/" + strings.TrimPrefix(spotifyURI, "spotify:playlist:")
+	case strings.Contains(spotifyURI, "open.spotify.com"):
+		pageURL = strings.Split(spotifyURI, "?")[0]
 	default:
 		return nil, errors.New("unsupported uri")
 	}
@@ -172,17 +198,29 @@ func GetSpotifyQueryResults(ctx context.Context, uri string) ([]*QueryPayloadRes
 		{URLPattern: "*pathfinder/v2/query*", RequestStage: fetch.RequestStageRequest},
 	}))
 
+	var mu sync.Mutex
+	var results []*QueryPayloadResult
+	seen := map[string]bool{}
+
 	chromedp.ListenTarget(cctx, func(ev interface{}) {
-		if e, ok := ev.(*fetch.EventRequestPaused); ok {
-			if strings.Contains(e.Request.URL, "pathfinder/v2/query") {
+		if fev, ok := ev.(*fetch.EventRequestPaused); ok {
+			if strings.Contains(fev.Request.URL, "pathfinder/v2/query") {
 				pd, _ := network.GetRequestPostData(
-					network.RequestID(e.RequestID.String()),
+					network.RequestID(fev.RequestID.String()),
 				).Do(cctx)
+
 				if pd != "" {
-					processPostData(pd)
+					processPostData(
+						fev.RequestID.String(),
+						pd,
+						&mu,
+						&results,
+						seen,
+						fev.Request.Headers,
+					)
 				}
 			}
-			_ = fetch.ContinueRequest(e.RequestID).Do(cctx)
+			_ = fetch.ContinueRequest(fev.RequestID).Do(cctx)
 		}
 	})
 
@@ -191,38 +229,22 @@ func GetSpotifyQueryResults(ctx context.Context, uri string) ([]*QueryPayloadRes
 		chromedp.Navigate(pageURL),
 		chromedp.Sleep(4*time.Second),
 		chromedp.Reload(),
-		chromedp.Sleep(4*time.Second),
+		chromedp.Sleep(5*time.Second),
 	); err != nil {
 		return nil, err
 	}
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(3 * time.Second)
 
-	stateMu.Lock()
-	defer stateMu.Unlock()
-
-	var out []*QueryPayloadResult
-	for _, s := range states {
-		if s.Hash != "" && s.OperationName != "" {
-			out = append(out, &QueryPayloadResult{
-				OperationName: s.OperationName,
-				PersistedQuery: &PersistedQueryInfo{
-					Version:    s.Version,
-					Sha256Hash: s.Hash,
-				},
-			})
-		}
+	if len(results) == 0 {
+		return nil, errors.New("no matching queries")
 	}
 
-	if len(out) == 0 {
-		return nil, errors.New("no queries with operationName")
-	}
-
-	return out, nil
+	return results, nil
 }
 
 /* =========================
-   FINAL API
+   RESULT SELECTION (FIX!)
    ========================= */
 
 func GetSpotifyQueryResult(ctx context.Context, uri string) (*QueryResult, error) {
@@ -231,17 +253,26 @@ func GetSpotifyQueryResult(ctx context.Context, uri string) (*QueryResult, error
 		return nil, err
 	}
 
-	r := results[0]
-	return &QueryResult{
-		Hash:              r.PersistedQuery.Sha256Hash,
-		PayloadVersion:    strconv.Itoa(r.PersistedQuery.Version),
-		OperationName:     r.OperationName,
-		SpotifyAppVersion: "",
-	}, nil
+	// ✅ ZAWSZE preferuj: hash + operationName
+	for _, r := range results {
+		if r.PersistedQuery != nil &&
+			r.PersistedQuery.Sha256Hash != "" &&
+			r.OperationName != "" {
+
+			return &QueryResult{
+				Hash:              r.PersistedQuery.Sha256Hash,
+				SpotifyAppVersion: r.SpotifyAppVersion,
+				PayloadVersion:    strconv.Itoa(r.PersistedQuery.Version),
+				OperationName:     r.OperationName,
+			}, nil
+		}
+	}
+
+	return nil, errors.New("no query with hash and operationName")
 }
 
 /* =========================
-   HTTP COMPAT
+   BACKWARD COMPAT API
    ========================= */
 
 func GetSpotifyQueryResultFromRequestWithBrowser(
@@ -249,9 +280,17 @@ func GetSpotifyQueryResultFromRequestWithBrowser(
 	b *Browser,
 	r *http.Request,
 ) (*QueryResult, error) {
-	uri := r.URL.Query().Get("uri")
+	q := r.URL.Query()
+	uri := q.Get("uri")
 	if uri == "" {
-		return nil, errors.New("missing uri")
+		uri = q.Get("playlist")
 	}
+	if uri == "" {
+		uri = q.Get("track")
+	}
+	if uri == "" {
+		return nil, errors.New("empty uri")
+	}
+
 	return GetSpotifyQueryResult(ctx, uri)
 }
