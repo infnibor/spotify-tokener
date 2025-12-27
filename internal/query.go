@@ -122,11 +122,12 @@ func GetSpotifyQueryResult(ctx context.Context, playlistURI string) (*QueryResul
 		hv = first.PersistedQuery.Sha256Hash
 		pv = strconv.Itoa(first.PersistedQuery.Version)
 	}
-	return &QueryResult{
-		Hash:              hv,
-		SpotifyAppVersion: first.SpotifyAppVersion,
-		PayloadVersion:    pv,
-	}, nil
+	       return &QueryResult{
+		       Hash:              hv,
+		       SpotifyAppVersion: first.SpotifyAppVersion,
+		       PayloadVersion:    pv,
+		       OperationName:     first.OperationName,
+	       }, nil
 }
 
 // GetSpotifyQueryResults visits the provided Spotify URI (track or playlist), reloads, and
