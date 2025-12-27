@@ -89,11 +89,6 @@ func scrapeHash(ctx context.Context, ht HashType) (string, error) {
        return "", errors.New("no hash found in scrape for " + ht.String())
 }
 
-type QueryResult struct {
-	Hash              string `json:"hash"`
-	SpotifyAppVersion string `json:"spotifyAppVersion"`
-	PayloadVersion    string `json:"payloadVersion"`
-}
 
 type PersistedQueryInfo struct {
 	Version    int    `json:"version"`
