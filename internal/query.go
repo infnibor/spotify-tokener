@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -102,12 +101,10 @@ func processPostData(
 	stateAny, _ := requestStates.LoadOrStore(requestID, &requestState{})
 	state := stateAny.(*requestState)
 
-	/* ---- operationName extraction ---- */
-
+	// ---- operationName ----
 	if op, ok := raw["operationName"].(string); ok && op != "" {
 		state.OperationName = op
 	}
-
 	if state.OperationName == "" {
 		if ext, ok := raw["extensions"].(map[string]interface{}); ok {
 			if op, ok := ext["operationName"].(string); ok && op != "" {
@@ -115,13 +112,11 @@ func processPostData(
 			}
 		}
 	}
-
 	if state.OperationName == "" {
 		findOperationName(raw, state)
 	}
 
-	/* ---- hash extraction ---- */
-
+	// ---- hash ----
 	if ext, ok := raw["extensions"].(map[string]interface{}); ok {
 		if pq, ok := ext["persistedQuery"].(map[string]interface{}); ok {
 			if h, ok := pq["sha256Hash"].(string); ok {
@@ -135,7 +130,6 @@ func processPostData(
 
 	state.RawPayload = raw
 
-	// ❗ NIE EMITUJEMY, jeśli nie mamy OBU
 	if state.Hash == "" || state.OperationName == "" {
 		return
 	}
@@ -160,7 +154,7 @@ func processPostData(
 }
 
 /* =========================
-   SCRAPER
+   CORE SCRAPER
    ========================= */
 
 func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPayloadResult, error) {
@@ -205,70 +199,32 @@ func GetSpotifyQueryResults(ctx context.Context, spotifyURI string) ([]*QueryPay
 	chromedp.ListenTarget(cctx, func(ev interface{}) {
 		if fev, ok := ev.(*fetch.EventRequestPaused); ok {
 			if strings.Contains(fev.Request.URL, "pathfinder/v2/query") {
-				pd, _ := network.GetRequestPostData(
-					network.RequestID(fev.RequestID.String()),
-				).Do(cctx)
-
+				pd, _ := network.GetRequestPostData(network.RequestID(fev.RequestID.String())).Do(cctx)
 				if pd != "" {
-					processPostData(
-						fev.RequestID.String(),
-						pd,
-						&mu,
-						&results,
-						seen,
-						fev.Request.Headers,
-					)
+					processPostData(fev.RequestID.String(), pd, &mu, &results, seen, fev.Request.Headers)
 				}
 			}
 			_ = fetch.ContinueRequest(fev.RequestID).Do(cctx)
 		}
 	})
 
-	if err := chromedp.Run(
+	err := chromedp.Run(
 		cctx,
 		chromedp.Navigate(pageURL),
 		chromedp.Sleep(4*time.Second),
 		chromedp.Reload(),
 		chromedp.Sleep(5*time.Second),
-	); err != nil {
+	)
+	if err != nil {
 		return nil, err
 	}
 
 	time.Sleep(3 * time.Second)
 
 	if len(results) == 0 {
-		return nil, errors.New("no matching queries")
+		return nil, errors.New("no queries captured")
 	}
-
 	return results, nil
-}
-
-/* =========================
-   RESULT SELECTION (FIX!)
-   ========================= */
-
-func GetSpotifyQueryResult(ctx context.Context, uri string) (*QueryResult, error) {
-	results, err := GetSpotifyQueryResults(ctx, uri)
-	if err != nil {
-		return nil, err
-	}
-
-	// ✅ ZAWSZE preferuj: hash + operationName
-	for _, r := range results {
-		if r.PersistedQuery != nil &&
-			r.PersistedQuery.Sha256Hash != "" &&
-			r.OperationName != "" {
-
-			return &QueryResult{
-				Hash:              r.PersistedQuery.Sha256Hash,
-				SpotifyAppVersion: r.SpotifyAppVersion,
-				PayloadVersion:    strconv.Itoa(r.PersistedQuery.Version),
-				OperationName:     r.OperationName,
-			}, nil
-		}
-	}
-
-	return nil, errors.New("no query with hash and operationName")
 }
 
 /* =========================
@@ -292,5 +248,17 @@ func GetSpotifyQueryResultFromRequestWithBrowser(
 		return nil, errors.New("empty uri")
 	}
 
-	return GetSpotifyQueryResult(ctx, uri)
+	results, err := GetSpotifyQueryResults(ctx, uri)
+	if err != nil || len(results) == 0 {
+		return nil, errors.New("no query result")
+	}
+
+	r0 := results[0]
+	return &QueryResult{
+		Hash:          r0.PersistedQuery.Sha256Hash,
+		OperationName: r0.OperationName,
+		PayloadVersion: func() string {
+			return ""
+		}(),
+	}, nil
 }
