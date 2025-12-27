@@ -70,7 +70,42 @@ func (s *Server) handleHash(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	debug := query.Get("debug") == "true"
 
-	result, err := internal.GetSpotifyQueryResultFromRequestWithBrowser(ctx, s.browser, r)
+	// Accept track, uri, or url as param
+	input := query.Get("track")
+	if input == "" {
+		input = query.Get("uri")
+	}
+	if input == "" {
+		input = query.Get("url")
+	}
+	if input == "" {
+		s.respondError(w, http.StatusBadRequest, "Missing track, uri, or url parameter")
+		return
+	}
+
+	// Normalize input, extract type and ID
+	typeName, id := internal.ParseSpotifyTypeAndID(input)
+	if typeName == "" || id == "" {
+		s.respondError(w, http.StatusBadRequest, "Invalid Spotify URI or URL")
+		return
+	}
+
+	// Set operationName based on type
+	var operationName string
+	switch typeName {
+	case "track":
+		operationName = "getTrack"
+	case "playlist":
+		operationName = "fetchPlaylist"
+	case "album":
+		operationName = "getAlbum"
+	default:
+		s.respondError(w, http.StatusBadRequest, "Unsupported Spotify type")
+		return
+	}
+
+	// Call internal logic (simulate hash manager freshness check)
+	result, err := internal.GetSpotifyQueryResultByType(ctx, typeName, id, operationName)
 	if err != nil {
 		s.logger.Error("Hash fetch failed: " + err.Error())
 		if debug {
@@ -89,6 +124,7 @@ func (s *Server) handleHash(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(result)
 }
+
 
 func (s *Server) Start() error {
 	port := s.httpServer.Addr
