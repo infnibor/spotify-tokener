@@ -24,7 +24,7 @@ type MetadataResult struct {
 type metadataConfig struct {
 	operationName string
 	url           string
-	waitTime      time.Duration // How long to wait after navigation
+	waitTime      time.Duration
 }
 
 var metadataConfigs = map[string]metadataConfig{
@@ -78,17 +78,21 @@ type MetadataService struct {
 	cacheTime   map[string]time.Time
 	allocCtx    context.Context
 	allocCancel context.CancelFunc
+	updateCh chan string
 }
 
 func NewMetadataService(logger *Logger) *MetadataService {
-	ms := &MetadataService{
-		logger:    logger,
-		cache:     make(map[string]*MetadataResult),
-		cacheTime: make(map[string]time.Time),
-		cacheTTL:  30 * time.Minute,
-	}
 
-	// Initialize browser allocator once for reuse
+		ms := &MetadataService{
+			logger:    logger,
+			cache:     make(map[string]*MetadataResult),
+			cacheTime: make(map[string]time.Time),
+			cacheTTL:  30 * time.Minute,
+			updateCh:  make(chan string, 10),
+		}
+
+		go ms.backgroundUpdater()
+
 	ms.initializeBrowser()
 
 	return ms
@@ -126,46 +130,44 @@ func (ms *MetadataService) GetMetadata(ctx context.Context, metadataType string)
 	cached, cacheTime := ms.cache[metadataType], ms.cacheTime[metadataType]
 	ms.mu.RUnlock()
 
-	if cached != nil && time.Since(cacheTime) < ms.cacheTTL {
+	if cached != nil {
 		ms.logger.Debugf("Returning cached metadata for type: %s", metadataType)
+		if time.Since(cacheTime) >= ms.cacheTTL {
+			select {
+			case ms.updateCh <- metadataType:
+				ms.logger.Debugf("Scheduled async metadata update for: %s", metadataType)
+			default:
+				ms.logger.Debugf("Update channel full, skipping async update for: %s", metadataType)
+			}
+		}
 		return cached, nil
 	}
 
-	config, exists := metadataConfigs[metadataType]
-	if !exists {
-		supported := make([]string, 0, len(metadataConfigs))
-		for k := range metadataConfigs {
-			supported = append(supported, k)
-		}
-		return nil, fmt.Errorf("unsupported metadata type: %s (supported: %v)", metadataType, supported)
+	select {
+	case ms.updateCh <- metadataType:
+		ms.logger.Debugf("Scheduled async metadata update for: %s", metadataType)
+	default:
+		ms.logger.Debugf("Update channel full, skipping async update for: %s", metadataType)
 	}
 
-	ms.logger.Infof("Fetching fresh metadata for type: %s", metadataType)
-	result, err := ms.fetchMetadata(ctx, config)
-	if err != nil {
-		return nil, err
-	}
-
-	ms.mu.Lock()
-	ms.cache[metadataType] = result
-	ms.cacheTime[metadataType] = time.Now()
-	ms.mu.Unlock()
-
-	return result, nil
+	return &MetadataResult{
+		OperationName: metadataType,
+		Hash:          "pending",
+		SpotifyAppVersion: "pending",
+		PayloadVersion: "pending",
+	}, nil
 }
 
 func (ms *MetadataService) fetchMetadata(ctx context.Context, config metadataConfig) (*MetadataResult, error) {
 	browserCtx, browserCancel := chromedp.NewContext(ms.allocCtx)
 	defer browserCancel()
 
-	// Set timeout for the entire operation
-	timeoutCtx, timeoutCancel := context.WithTimeout(browserCtx, 30*time.Second)
+	timeoutCtx, timeoutCancel := context.WithTimeout(browserCtx, 10*time.Second)
 	defer timeoutCancel()
 
 	var mu sync.Mutex
 	capturedRequests := make([]capturedRequest, 0)
 
-	// Listen for network requests
 	chromedp.ListenTarget(timeoutCtx, func(ev interface{}) {
 		if e, ok := ev.(*network.EventRequestWillBeSent); ok {
 			if strings.Contains(e.Request.URL, "/pathfinder/v2/query") && e.Request.Method == "POST" {
@@ -176,7 +178,6 @@ func (ms *MetadataService) fetchMetadata(ctx context.Context, config metadataCon
 					requestID: e.RequestID,
 				}
 
-				// Extract Spotify app version from headers
 				for k, v := range e.Request.Headers {
 					if strings.ToLower(k) == "spotify-app-version" {
 						if vs, ok := v.(string); ok {
@@ -193,11 +194,36 @@ func (ms *MetadataService) fetchMetadata(ctx context.Context, config metadataCon
 
 	ms.logger.Infof("Navigating to: %s", config.url)
 
-	// Simple navigation and wait - no complex interactions needed
+	minWait := config.waitTime
+	if minWait > time.Second {
+		minWait = time.Second
+	}
 	tasks := []chromedp.Action{
 		chromedp.Navigate(config.url),
-		chromedp.Sleep(config.waitTime),
+		chromedp.Sleep(minWait),
 	}
+
+	func (ms *MetadataService) backgroundUpdater() {
+	for metadataType := range ms.updateCh {
+		config, exists := metadataConfigs[metadataType]
+		if !exists {
+			ms.logger.Errorf("Unknown metadata type for async update: %s", metadataType)
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+		result, err := ms.fetchMetadata(ctx, config)
+		cancel()
+		if err != nil {
+			ms.logger.Errorf("Async metadata update failed for %s: %v", metadataType, err)
+			continue
+		}
+		ms.mu.Lock()
+		ms.cache[metadataType] = result
+		ms.cacheTime[metadataType] = time.Now()
+		ms.mu.Unlock()
+		ms.logger.Infof("Async metadata updated for %s", metadataType)
+	}
+}
 
 	if err := chromedp.Run(timeoutCtx, tasks...); err != nil {
 		ms.logger.Errorf("Browser navigation failed for %s: %v", config.operationName, err)
