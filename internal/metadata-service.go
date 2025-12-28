@@ -150,36 +150,37 @@ func (ms *MetadataService) initializeBrowser() {
 }
 
 func (ms *MetadataService) GetMetadata(ctx context.Context, metadataType string) (*MetadataResult, error) {
-	ms.mu.RLock()
-	cached, cacheTime := ms.cache[metadataType], ms.cacheTime[metadataType]
-	ms.mu.RUnlock()
+	   ms.mu.RLock()
+	   cached, cacheTime := ms.cache[metadataType], ms.cacheTime[metadataType]
+	   ms.mu.RUnlock()
 
-	if cached != nil {
-		ms.logger.Debugf("Returning cached metadata for type: %s", metadataType)
-		if time.Since(cacheTime) >= ms.cacheTTL {
-			select {
-			case ms.updateCh <- metadataType:
-				ms.logger.Debugf("Scheduled async metadata update for: %s", metadataType)
-			default:
-				ms.logger.Debugf("Update channel full, skipping async update for: %s", metadataType)
-			}
-		}
-		return cached, nil
-	}
+	   if cached != nil {
+		   ms.logger.Debugf("Returning cached metadata for type: %s", metadataType)
+		   if time.Since(cacheTime) >= ms.cacheTTL {
+			   select {
+			   case ms.updateCh <- metadataType:
+				   ms.logger.Debugf("Scheduled async metadata update for: %s", metadataType)
+			   default:
+				   ms.logger.Debugf("Update channel full, skipping async update for: %s", metadataType)
+			   }
+		   }
+		   return cached, nil
+	   }
 
-	select {
-	case ms.updateCh <- metadataType:
-		ms.logger.Debugf("Scheduled async metadata update for: %s", metadataType)
-	default:
-		ms.logger.Debugf("Update channel full, skipping async update for: %s", metadataType)
-	}
-
-	return &MetadataResult{
-		OperationName: metadataType,
-		Hash:          "pending",
-		SpotifyAppVersion: "pending",
-		PayloadVersion: "pending",
-	}, nil
+	   // No cached value, fetch synchronously
+	   config, exists := metadataConfigs[metadataType]
+	   if !exists {
+		   return nil, fmt.Errorf("unknown metadata type: %s", metadataType)
+	   }
+	   result, err := ms.fetchMetadata(ctx, config)
+	   if err != nil {
+		   return nil, err
+	   }
+	   ms.mu.Lock()
+	   ms.cache[metadataType] = result
+	   ms.cacheTime[metadataType] = time.Now()
+	   ms.mu.Unlock()
+	   return result, nil
 }
 
 func (ms *MetadataService) fetchMetadata(ctx context.Context, config metadataConfig) (*MetadataResult, error) {
