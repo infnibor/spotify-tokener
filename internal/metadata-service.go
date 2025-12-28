@@ -197,107 +197,85 @@ func (ms *MetadataService) fetchMetadata(ctx context.Context, config metadataCon
 	minWait := config.waitTime
 	if minWait > time.Second {
 		minWait = time.Second
-	}
-	tasks := []chromedp.Action{
-		chromedp.Navigate(config.url),
-		chromedp.Sleep(minWait),
-	}
+	   }
+	   tasks := []chromedp.Action{
+		   chromedp.Navigate(config.url),
+		   chromedp.Sleep(minWait),
+	   }
 
-	func (ms *MetadataService) backgroundUpdater() {
-	for metadataType := range ms.updateCh {
-		config, exists := metadataConfigs[metadataType]
-		if !exists {
-			ms.logger.Errorf("Unknown metadata type for async update: %s", metadataType)
-			continue
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-		result, err := ms.fetchMetadata(ctx, config)
-		cancel()
-		if err != nil {
-			ms.logger.Errorf("Async metadata update failed for %s: %v", metadataType, err)
-			continue
-		}
-		ms.mu.Lock()
-		ms.cache[metadataType] = result
-		ms.cacheTime[metadataType] = time.Now()
-		ms.mu.Unlock()
-		ms.logger.Infof("Async metadata updated for %s", metadataType)
-	}
-}
+	   if err := chromedp.Run(timeoutCtx, tasks...); err != nil {
+		   ms.logger.Errorf("Browser navigation failed for %s: %v", config.operationName, err)
+		   return nil, fmt.Errorf("navigation failed: %w", err)
+	   }
 
-	if err := chromedp.Run(timeoutCtx, tasks...); err != nil {
-		ms.logger.Errorf("Browser navigation failed for %s: %v", config.operationName, err)
-		return nil, fmt.Errorf("navigation failed: %w", err)
-	}
+	   // Give a bit more time to capture all requests
+	   time.Sleep(500 * time.Millisecond)
 
-	// Give a bit more time to capture all requests
-	time.Sleep(500 * time.Millisecond)
+	   mu.Lock()
+	   requests := make([]capturedRequest, len(capturedRequests))
+	   copy(requests, capturedRequests)
+	   mu.Unlock()
 
-	mu.Lock()
-	requests := make([]capturedRequest, len(capturedRequests))
-	copy(requests, capturedRequests)
-	mu.Unlock()
+	   if len(requests) == 0 {
+		   ms.logger.Errorf("No pathfinder requests captured for operation: %s", config.operationName)
+		   return nil, errors.New("failed to capture any metadata requests")
+	   }
 
-	if len(requests) == 0 {
-		ms.logger.Errorf("No pathfinder requests captured for operation: %s", config.operationName)
-		return nil, errors.New("failed to capture any metadata requests")
-	}
+	   ms.logger.Infof("Captured %d pathfinder requests, analyzing...", len(requests))
 
-	ms.logger.Infof("Captured %d pathfinder requests, analyzing...", len(requests))
+	   // Try each captured request to find the matching operation
+	   for i, req := range requests {
+		   ms.logger.Debugf("Analyzing request %d/%d", i+1, len(requests))
 
-	// Try each captured request to find the matching operation
-	for i, req := range requests {
-		ms.logger.Debugf("Analyzing request %d/%d", i+1, len(requests))
+		   var postData string
+		   err := chromedp.Run(timeoutCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+			   pd, err := network.GetRequestPostData(req.requestID).Do(ctx)
+			   if err != nil {
+				   return err
+			   }
+			   postData = pd
+			   return nil
+		   }))
 
-		var postData string
-		err := chromedp.Run(timeoutCtx, chromedp.ActionFunc(func(ctx context.Context) error {
-			pd, err := network.GetRequestPostData(req.requestID).Do(ctx)
-			if err != nil {
-				return err
-			}
-			postData = pd
-			return nil
-		}))
+		   if err != nil {
+			   ms.logger.Debugf("Failed to get POST data for request %d: %v", i+1, err)
+			   continue
+		   }
 
-		if err != nil {
-			ms.logger.Debugf("Failed to get POST data for request %d: %v", i+1, err)
-			continue
-		}
+		   if postData == "" || !strings.Contains(postData, "sha256Hash") {
+			   ms.logger.Debugf("Request %d has invalid POST data", i+1)
+			   continue
+		   }
 
-		if postData == "" || !strings.Contains(postData, "sha256Hash") {
-			ms.logger.Debugf("Request %d has invalid POST data", i+1)
-			continue
-		}
+		   // Extract operation name for debugging
+		   var name map[string]interface{}
+		   if err := json.Unmarshal([]byte(postData), &name); err == nil {
+			   if opName, ok := name["operationName"].(string); ok {
+				   ms.logger.Debugf("Request %d operation: %s (looking for: %s)", i+1, opName, config.operationName)
+			   }
+		   }
 
-		// Extract operation name for debugging
-		var name map[string]interface{}
-		if err := json.Unmarshal([]byte(postData), &name); err == nil {
-			if opName, ok := name["operationName"].(string); ok {
-				ms.logger.Debugf("Request %d operation: %s (looking for: %s)", i+1, opName, config.operationName)
-			}
-		}
+		   // Check if this is the operation we're looking for
+		   if !strings.Contains(postData, config.operationName) {
+			   continue
+		   }
 
-		// Check if this is the operation we're looking for
-		if !strings.Contains(postData, config.operationName) {
-			continue
-		}
+		   // Found the right request! Parse it
+		   ms.logger.Infof("Found matching request for operation: %s", config.operationName)
 
-		// Found the right request! Parse it
-		ms.logger.Infof("Found matching request for operation: %s", config.operationName)
+		   var payload map[string]interface{}
+		   if err := json.Unmarshal([]byte(postData), &payload); err != nil {
+			   ms.logger.Errorf("Failed to parse POST data for %s: %v", config.operationName, err)
+			   continue
+		   }
 
-		var payload map[string]interface{}
-		if err := json.Unmarshal([]byte(postData), &payload); err != nil {
-			ms.logger.Errorf("Failed to parse POST data for %s: %v", config.operationName, err)
-			continue
-		}
+		   ext, ok := payload["extensions"].(map[string]interface{})
+		   if !ok {
+			   ms.logger.Debug("Missing extensions in payload")
+			   continue
+		   }
 
-		ext, ok := payload["extensions"].(map[string]interface{})
-		if !ok {
-			ms.logger.Debug("Missing extensions in payload")
-			continue
-		}
-
-		pq, ok := ext["persistedQuery"].(map[string]interface{})
+		   pq, ok := ext["persistedQuery"].(map[string]interface{})
 		if !ok {
 			ms.logger.Debug("Missing persistedQuery in payload")
 			continue
