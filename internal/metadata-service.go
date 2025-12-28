@@ -1,3 +1,25 @@
+// backgroundUpdater runs in a goroutine and updates metadata cache asynchronously
+func (ms *MetadataService) backgroundUpdater() {
+	for metadataType := range ms.updateCh {
+	config, exists := metadataConfigs[metadataType]
+	if !exists {
+		   ms.logger.Errorf("Unknown metadata type for async update: %s", metadataType)
+		   continue
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	result, err := ms.fetchMetadata(ctx, config)
+	cancel()
+	if err != nil {
+		   ms.logger.Errorf("Async metadata update failed for %s: %v", metadataType, err)
+		   continue
+	}
+	ms.mu.Lock()
+	ms.cache[metadataType] = result
+	ms.cacheTime[metadataType] = time.Now()
+	ms.mu.Unlock()
+	ms.logger.Infof("Async metadata updated for %s", metadataType)
+	}
+}
 package internal
 
 import (
