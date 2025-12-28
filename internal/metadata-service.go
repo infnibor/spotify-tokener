@@ -1,6 +1,20 @@
 
 package internal
 
+import (
+   "context"
+   "encoding/json"
+   "errors"
+   "fmt"
+   "os"
+   "strings"
+   "sync"
+   "time"
+
+   "github.com/chromedp/cdproto/network"
+   "github.com/chromedp/chromedp"
+)
+
 // backgroundUpdater runs in a goroutine and updates metadata cache asynchronously
 func (ms *MetadataService) backgroundUpdater() {
    for metadataType := range ms.updateCh {
@@ -23,20 +37,6 @@ func (ms *MetadataService) backgroundUpdater() {
 	   ms.logger.Infof("Async metadata updated for %s", metadataType)
    }
 }
-
-import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"strings"
-	"sync"
-	"time"
-
-	"github.com/chromedp/cdproto/network"
-	"github.com/chromedp/chromedp"
-)
 
 type MetadataResult struct {
 	OperationName     string `json:"operationName"`
